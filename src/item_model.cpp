@@ -47,6 +47,21 @@ QString formatModTime(const QString &rfc3339) {
     return rfc3339;
   }
 
+  // Backends without directory metadata -- B2 and S3 among them, where
+  // directories are synthetic -- report a sentinel instead of a real time.
+  // rclone uses 2000-01-01T00:00:00Z; some backends use the Unix epoch.
+  // Showing it is worse than showing nothing: rendered in a timezone behind
+  // UTC the sentinel reads as "1999-12-31", which looks like a decoding bug.
+  //
+  // Anything at or before the sentinel is treated as unknown. A genuine file
+  // older than 2000 would be blanked too, but that is both vanishingly rare in
+  // cloud storage and a harmless failure next to displaying a wrong date.
+  static const QDateTime unknownBefore(QDate(2000, 1, 1), QTime(0, 0),
+                                       QTimeZone::UTC);
+  if (parsed.toUTC() <= unknownBefore) {
+    return QString();
+  }
+
   return parsed.toLocalTime().toString("yyyy-MM-dd HH:mm:ss");
 }
 
