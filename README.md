@@ -105,6 +105,25 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --pre
 
 The binary lands in `build/build/`.
 
+### Releasing (macOS)
+
+```bash
+./scripts/release_macOS.sh --zip
+```
+
+Builds, bundles the Qt frameworks with `macdeployqt`, and produces a
+self-contained ~88 MB `.app` in `release/`.
+
+`macdeployqt` alone is not sufficient: it copies the frameworks in but leaves
+the build-time rpath pointing at the Homebrew Qt, so dyld loads Qt twice and
+warns that classes are "implemented in both" — with a threat of "mysterious
+crashes". The script strips that rpath, points it at the bundled frameworks,
+re-signs (every `install_name_tool` edit invalidates the signature), and fails
+if the bundle still links against the Qt prefix.
+
+The result is ad-hoc signed, which is fine locally. On another Mac it will be
+quarantined; clear it with `xattr -dr com.apple.quarantine`.
+
 ## Status
 
 The rclone side and the restic side both build clean and run on macOS with
