@@ -242,51 +242,12 @@ MainWindow::MainWindow() {
   QObject::connect(ui.remotes, &QListWidget::customContextMenuRequested, this,
                    &MainWindow::showRemotesContextMenu);
 
-  {
-    // One menu for both kinds of entry, matching the single remotes panel
-    // that now lists them together.
-    QMenu *remotesMenu = ui.menuBar->addMenu("&Remotes");
+  QObject::connect(ui.configRestic, &QPushButton::clicked, this,
+                   &MainWindow::manageResticRepos);
 
-    QAction *openRemote = remotesMenu->addAction("&Open");
-    openRemote->setShortcut(QKeySequence("Ctrl+O"));
-    QObject::connect(openRemote, &QAction::triggered, this,
-                     &MainWindow::openSelectedRemote);
-
-    QAction *refreshRemotes = remotesMenu->addAction("&Refresh");
-    refreshRemotes->setShortcut(QKeySequence::Refresh);
-    QObject::connect(refreshRemotes, &QAction::triggered, this,
-                     &MainWindow::rcloneListRemotes);
-
-    remotesMenu->addSeparator();
-
-    QAction *configureRclone =
-        remotesMenu->addAction("&Configure rclone Remotes...");
-    QObject::connect(configureRclone, &QAction::triggered, this,
-                     &MainWindow::rcloneConfig);
-
-    QAction *resticRepos = remotesMenu->addAction("Restic Re&positories...");
-    QObject::connect(resticRepos, &QAction::triggered, this,
-                     &MainWindow::manageResticRepos);
-
-    // On macOS Qt guesses a menu role from the text and would hoist anything
-    // containing "config" into the application menu as Preferences. These are
-    // ordinary items, so say so explicitly.
-    for (QAction *action : remotesMenu->actions()) {
-      action->setMenuRole(QAction::NoRole);
-    }
-
-    // Only meaningful with something selected in the remotes list.
-    auto updateRemotesMenu = [=]() {
-      const auto selected = ui.remotes->selectedItems();
-      openRemote->setEnabled(!selected.isEmpty() &&
-                             selected.front()->flags() != Qt::NoItemFlags);
-    };
-    QObject::connect(ui.remotes, &QListWidget::itemSelectionChanged, this,
-                     updateRemotesMenu);
-    QObject::connect(remotesMenu, &QMenu::aboutToShow, this,
-                     updateRemotesMenu);
-    updateRemotesMenu();
-  }
+  // Without document mode the tab bar sits in a tall framed band, separated
+  // from the content it labels.
+  ui.tabs->setDocumentMode(true);
 
   QObject::connect(ui.tabs, &QTabWidget::tabCloseRequested, ui.tabs,
                    &QTabWidget::removeTab);
@@ -911,6 +872,12 @@ void MainWindow::openSelectedRemote() {
                    &MainWindow::addStream);
   QObject::connect(remote, &RemoteWidget::addTransfer, this,
                    &MainWindow::addTransfer);
+  QObject::connect(remote, &RemoteWidget::openRestic, this,
+                   &MainWindow::openResticRepoAt);
+  QObject::connect(remote, &RemoteWidget::saveRestic, this,
+                   [=](const QString &r, const QString &p) {
+                     addResticRepoFromRemote(r, p);
+                   });
 
   const int index = ui.tabs->addTab(remote, name);
   ui.tabs->setCurrentIndex(index);
@@ -926,16 +893,38 @@ void MainWindow::openResticRepo(const ResticRepo &repo) {
   ui.tabs->setCurrentIndex(index);
 }
 
-void MainWindow::addResticRepoFromRemote(const QString &remote) {
-  bool ok = false;
-  const QString path = QInputDialog::getText(
-      this, "Add restic repository",
-      QString("Path of the restic repository within %1:\n\n"
-              "Leave empty if the repository is at the root of the remote.")
-          .arg(remote),
-      QLineEdit::Normal, QString(), &ok);
-  if (!ok) {
-    return;
+void MainWindow::openResticRepoAt(const QString &remote, const QString &path) {
+  ResticRepo repo;
+  repo.repository = ResticRepoForRemote(remote, path);
+  repo.name = path.isEmpty() ? remote : remote + "/" + path;
+
+  // Prefer a saved entry for the same repository, so a configured password
+  // command applies instead of prompting.
+  for (const ResticRepo &known : GetResticRepos()) {
+    if (known.repository == repo.repository) {
+      repo = known;
+      break;
+    }
+  }
+
+  openResticRepo(repo);
+}
+
+void MainWindow::addResticRepoFromRemote(const QString &remote,
+                                         const QString &path_) {
+  QString path = path_;
+
+  if (path.isEmpty()) {
+    bool ok = false;
+    path = QInputDialog::getText(
+        this, "Add restic repository",
+        QString("Path of the restic repository within %1:\n\n"
+                "Leave empty if the repository is at the root of the remote.")
+            .arg(remote),
+        QLineEdit::Normal, QString(), &ok);
+    if (!ok) {
+      return;
+    }
   }
 
   ResticRepo prefilled;

@@ -64,10 +64,26 @@
              </sizepolicy>
             </property>
             <property name="toolTip">
-             <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;rclone config&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+             <string>Open rclone's interactive configuration in a terminal</string>
             </property>
             <property name="text">
-             <string>&amp;Config...</string>
+             <string>Configure &amp;rclone...</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="configRestic">
+            <property name="sizePolicy">
+             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+              <horstretch>0</horstretch>
+              <verstretch>0</verstretch>
+             </sizepolicy>
+            </property>
+            <property name="toolTip">
+             <string>Add, edit and remove restic repositories</string>
+            </property>
+            <property name="text">
+             <string>Restic Re&amp;positories...</string>
             </property>
            </widget>
           </item>

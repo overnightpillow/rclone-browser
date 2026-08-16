@@ -52,7 +52,11 @@ private:
   // Restic: opens a repository in its own tab, prompting for the password
   // first when the repository has no password command configured.
   void openResticRepo(const ResticRepo &repo);
-  void addResticRepoFromRemote(const QString &remote);
+  // Opens a repository at a known location without saving it to the list.
+  void openResticRepoAt(const QString &remote, const QString &path);
+  // Prompts for the path when it is empty, then saves and opens.
+  void addResticRepoFromRemote(const QString &remote,
+                               const QString &path = QString());
   void manageResticRepos();
   void showRemotesContextMenu(const QPoint &pos);
 
