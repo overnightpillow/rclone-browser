@@ -34,13 +34,28 @@ ResticRepoDialog::ResticRepoDialog(QWidget *parent, const ResticRepo &initial)
   mRepository->setMinimumWidth(320);
 
   auto *hint = new QLabel(
-      "<small>Anything restic accepts after <tt>-r</tt>: a local path, "
-      "<tt>s3:https://…</tt>, <tt>b2:bucket:path</tt>, or "
-      "<tt>rclone:remote:path</tt> to reach the repository through an rclone "
-      "remote already configured here.<br><br>"
-      "A password command is run by restic and its output used as the "
-      "repository password, so the password itself is never stored by this "
-      "application. Without one you are prompted once per session.</small>",
+      "<small>"
+      "<b>Repository</b> — anything restic accepts after <tt>-r</tt>: a local "
+      "path, <tt>s3:https://…</tt>, <tt>b2:bucket:path</tt>, or "
+      "<tt>rclone:remote:path</tt> to reach it through an rclone remote "
+      "already configured here."
+      "<br><br>"
+      "<b>Password command</b> — a shell command printing the password on "
+      "stdout. restic runs it directly, so the password never passes through "
+      "this application and is never written to its settings. Leave empty to "
+      "be prompted once per session (held in memory only)."
+      "<br><br>"
+      "From the macOS keychain, after storing it once with<br>"
+      "<tt>security add-generic-password -a \"$USER\" -s NAME -w</tt>:"
+      "<br><tt>security find-generic-password -a \"$USER\" -s NAME -w</tt>"
+      "<br><br>"
+      "From a file (<tt>chmod 600</tt> it first):"
+      "<br><tt>cat ~/.config/restic/NAME.key</tt>"
+      "<br><br>"
+      "An environment variable set in your shell profile will <b>not</b> "
+      "work: this application is launched by the system, so it does not "
+      "inherit your shell's environment."
+      "</small>",
       this);
   hint->setWordWrap(true);
   hint->setTextFormat(Qt::RichText);
@@ -70,7 +85,7 @@ ResticRepoDialog::ResticRepoDialog(QWidget *parent, const ResticRepo &initial)
   QObject::connect(mRepository, &QLineEdit::textChanged, this, updateOk);
   updateOk();
 
-  resize(560, sizeHint().height());
+  resize(620, sizeHint().height());
 }
 
 ResticRepo ResticRepoDialog::repo() const {
