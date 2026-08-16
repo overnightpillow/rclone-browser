@@ -243,10 +243,49 @@ MainWindow::MainWindow() {
                    &MainWindow::showRemotesContextMenu);
 
   {
-    QMenu *resticMenu = ui.menuBar->addMenu("&Restic");
-    QAction *browse = resticMenu->addAction("&Repositories...");
-    QObject::connect(browse, &QAction::triggered, this,
+    // One menu for both kinds of entry, matching the single remotes panel
+    // that now lists them together.
+    QMenu *remotesMenu = ui.menuBar->addMenu("&Remotes");
+
+    QAction *openRemote = remotesMenu->addAction("&Open");
+    openRemote->setShortcut(QKeySequence("Ctrl+O"));
+    QObject::connect(openRemote, &QAction::triggered, this,
+                     &MainWindow::openSelectedRemote);
+
+    QAction *refreshRemotes = remotesMenu->addAction("&Refresh");
+    refreshRemotes->setShortcut(QKeySequence::Refresh);
+    QObject::connect(refreshRemotes, &QAction::triggered, this,
+                     &MainWindow::rcloneListRemotes);
+
+    remotesMenu->addSeparator();
+
+    QAction *configureRclone =
+        remotesMenu->addAction("&Configure rclone Remotes...");
+    QObject::connect(configureRclone, &QAction::triggered, this,
+                     &MainWindow::rcloneConfig);
+
+    QAction *resticRepos = remotesMenu->addAction("Restic Re&positories...");
+    QObject::connect(resticRepos, &QAction::triggered, this,
                      &MainWindow::manageResticRepos);
+
+    // On macOS Qt guesses a menu role from the text and would hoist anything
+    // containing "config" into the application menu as Preferences. These are
+    // ordinary items, so say so explicitly.
+    for (QAction *action : remotesMenu->actions()) {
+      action->setMenuRole(QAction::NoRole);
+    }
+
+    // Only meaningful with something selected in the remotes list.
+    auto updateRemotesMenu = [=]() {
+      const auto selected = ui.remotes->selectedItems();
+      openRemote->setEnabled(!selected.isEmpty() &&
+                             selected.front()->flags() != Qt::NoItemFlags);
+    };
+    QObject::connect(ui.remotes, &QListWidget::itemSelectionChanged, this,
+                     updateRemotesMenu);
+    QObject::connect(remotesMenu, &QMenu::aboutToShow, this,
+                     updateRemotesMenu);
+    updateRemotesMenu();
   }
 
   QObject::connect(ui.tabs, &QTabWidget::tabCloseRequested, ui.tabs,
@@ -259,6 +298,18 @@ MainWindow::MainWindow() {
                      ui.buttonRunTask->setEnabled(current != nullptr);
                      ui.buttonDryrunTask->setEnabled(current != nullptr);
                    });
+
+  QObject::connect(ui.buttonNewTask, &QPushButton::clicked, this, [=]() {
+    // Until now a task could only be created from the transfer dialog reached
+    // via Upload/Download inside a remote, and then only by noticing the
+    // "Save task" button. The Tasks tab could run, edit and delete tasks but
+    // offered no way to make one.
+    //
+    // Same dialog, opened with no remote context: it starts blank and the
+    // user fills in both sides.
+    TransferDialog dialog(false, false, QString(), QDir(), true, this);
+    dialog.exec();
+  });
 
   QObject::connect(ui.buttonRunTask, &QPushButton::clicked, this, [=]() {
     JobOptionsListWidgetItem *item = static_cast<JobOptionsListWidgetItem *>(
