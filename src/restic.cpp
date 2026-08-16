@@ -13,6 +13,14 @@ QHash<QString, QString> &passwordCache() {
 
 } // namespace
 
+QString ShellQuote(const QString &argument) {
+  // Single quotes protect everything except a single quote itself, which is
+  // closed, escaped and reopened: it's  ->  'it'\''s'
+  QString quoted = argument;
+  quoted.replace("'", R"('\'')");
+  return "'" + quoted + "'";
+}
+
 QString ResticRepoForRemote(const QString &remote, const QString &path) {
   QString trimmed = path;
   while (trimmed.startsWith('/')) {
@@ -112,7 +120,17 @@ void ApplyResticEnvironment(QProcess *process, const ResticRepo &repo) {
   env.insert("RESTIC_REPOSITORY", repo.repository);
 
   if (!repo.passwordCommand.isEmpty()) {
-    env.insert("RESTIC_PASSWORD_COMMAND", repo.passwordCommand);
+    // restic splits RESTIC_PASSWORD_COMMAND into argv and execs it directly --
+    // there is no shell, so "$USER" is passed through literally and pipes are
+    // meaningless. The obvious keychain incantation,
+    //
+    //     security find-generic-password -a "$USER" -s NAME -w
+    //
+    // therefore looks up an account named "$USER" and fails with exit 44,
+    // "item not found". Running it through sh gives the field the semantics
+    // anyone would assume it has.
+    env.insert("RESTIC_PASSWORD_COMMAND",
+               "sh -c " + ShellQuote(repo.passwordCommand));
   } else {
     auto it = passwordCache().find(repo.repository);
     if (it != passwordCache().end()) {

@@ -20,6 +20,7 @@ private slots:
   void versionComparison();
   void versionWithNonNumericComponent();
   void resticRepoForRemote();
+  void shellQuoting();
 
   void themeAdaptsToPalette();
   void themeHasNoHardcodedColours();
@@ -128,6 +129,31 @@ void TestFormatting::resticRepoForRemote() {
            QString("rclone:storj:tank0/kevin"));
   QCOMPARE(ResticRepoForRemote("storj", QString()),
            QString("rclone:storj:"));
+}
+
+void TestFormatting::shellQuoting() {
+  // The password command is wrapped in "sh -c <quoted>" because restic execs
+  // it without a shell, which would pass "$USER" through literally -- the
+  // keychain lookup then fails with security exit 44, "item not found".
+  QCOMPARE(ShellQuote("echo hi"), QString("'echo hi'"));
+
+  // The variable must survive quoting intact, for sh to expand rather than
+  // this application.
+  QCOMPARE(ShellQuote(R"(security find-generic-password -a "$USER" -s k -w)"),
+           QString(R"('security find-generic-password -a "$USER" -s k -w')"));
+
+  // A single quote closes, escapes and reopens.
+  QCOMPARE(ShellQuote("it's"), QString(R"('it'\''s')"));
+
+  // A command cannot break out of the quoting to run something else.
+  const QString hostile = "true'; rm -rf /tmp/x; echo '";
+  const QString quoted = ShellQuote(hostile);
+  QVERIFY(quoted.startsWith('\''));
+  QVERIFY(quoted.endsWith('\''));
+  QVERIFY(!quoted.contains(R"(; rm -rf /tmp/x; echo )") ||
+          quoted.contains(R"('\'')"));
+
+  QCOMPARE(ShellQuote(QString()), QString("''"));
 }
 
 void TestFormatting::themeAdaptsToPalette() {

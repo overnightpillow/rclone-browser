@@ -106,10 +106,17 @@ GUI launch.
 **Leaving the field empty** keeps the default: you are prompted once per
 session and the password is held in memory only, never written to disk.
 
-The command runs through a shell, so pipes and `&&` work. If it fails or prints
-nothing, restic reports an authentication failure, which surfaces as an error
-row in the snapshot list. Test the command in a terminal first — if it prints
-the password there, it will work here.
+The command is run through `sh`, so variables, pipes and `&&` all work, and a
+command that prints your password in a terminal will behave the same here.
+
+That wrapping is deliberate. restic splits `RESTIC_PASSWORD_COMMAND` into
+arguments and execs it directly, with no shell — so `"$USER"` would be passed
+through literally and the keychain lookup above would fail with `security` exit
+44, "item not found". Passing it to `sh` gives the field the semantics it looks
+like it has.
+
+If the command fails or prints nothing, restic reports an authentication
+failure, which surfaces as an error row in the snapshot list.
 
 ### Appearance
 

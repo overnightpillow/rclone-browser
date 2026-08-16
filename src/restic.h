@@ -23,6 +23,9 @@ struct ResticRepo {
 // Builds "rclone:<remote>:<path>" for a repository stored on an rclone remote.
 QString ResticRepoForRemote(const QString &remote, const QString &path);
 
+// Wraps an argument in single quotes for safe use in a shell command line.
+QString ShellQuote(const QString &argument);
+
 QList<ResticRepo> GetResticRepos();
 void SetResticRepos(const QList<ResticRepo> &repos);
 
