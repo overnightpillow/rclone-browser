@@ -27,9 +27,13 @@ set(HEADERS
   icon_cache.h
   list_of_job_options.h
   item_model.h
+  restic_model.h
+  restic_widget.h
+  restic_repo_dialog.h
   pch.h
   utils.h
   job_options.h
+  restic.h
 )
 
 set(SOURCES
@@ -48,6 +52,10 @@ set(SOURCES
   utils.cpp
   job_options.cpp
   list_of_job_options.cpp
+  restic.cpp
+  restic_model.cpp
+  restic_widget.cpp
+  restic_repo_dialog.cpp
 )
 
 if(WIN32)

@@ -5,6 +5,8 @@
 #include "mount_widget.h"
 #include "preferences_dialog.h"
 #include "remote_widget.h"
+#include "restic_repo_dialog.h"
+#include "restic_widget.h"
 #include "stream_widget.h"
 #include "transfer_dialog.h"
 #include "utils.h"
@@ -250,6 +252,19 @@ MainWindow::MainWindow() {
     int index = ui.tabs->addTab(remote, name);
     ui.tabs->setCurrentIndex(index);
   });
+
+  // Restic: right-click a remote to browse a restic repository stored on it,
+  // and a menu entry for repositories that are not backed by an rclone remote.
+  ui.remotes->setContextMenuPolicy(Qt::CustomContextMenu);
+  QObject::connect(ui.remotes, &QListWidget::customContextMenuRequested, this,
+                   &MainWindow::showRemotesContextMenu);
+
+  {
+    QMenu *resticMenu = ui.menuBar->addMenu("&Restic");
+    QAction *browse = resticMenu->addAction("&Repositories...");
+    QObject::connect(browse, &QAction::triggered, this,
+                     &MainWindow::manageResticRepos);
+  }
 
   QObject::connect(ui.tabs, &QTabWidget::tabCloseRequested, ui.tabs,
                    &QTabWidget::removeTab);
@@ -782,6 +797,153 @@ void MainWindow::rcloneConfig() {
   UseRclonePassword(p);
   p->start(QIODevice::NotOpen);
 #endif
+}
+
+void MainWindow::openResticRepo(const ResticRepo &repo) {
+  if (!EnsureResticPassword(repo, this)) {
+    return;
+  }
+
+  auto *widget = new ResticWidget(repo, ui.tabs);
+  const int index = ui.tabs->addTab(widget, "restic: " + repo.name);
+  ui.tabs->setCurrentIndex(index);
+}
+
+void MainWindow::openResticRepoFromRemote(const QString &remote) {
+  bool ok = false;
+  const QString path = QInputDialog::getText(
+      this, "Open restic repository",
+      QString("Path of the restic repository within %1:").arg(remote),
+      QLineEdit::Normal, QString(), &ok);
+  if (!ok) {
+    return;
+  }
+
+  ResticRepo repo;
+  repo.repository = ResticRepoForRemote(remote, path);
+  repo.name = remote + ":" + path;
+
+  // Reuse a stored entry for the same repository so a configured password
+  // command applies instead of prompting.
+  for (const ResticRepo &known : GetResticRepos()) {
+    if (known.repository == repo.repository) {
+      repo = known;
+      break;
+    }
+  }
+
+  openResticRepo(repo);
+}
+
+void MainWindow::showRemotesContextMenu(const QPoint &pos) {
+  QListWidgetItem *item = ui.remotes->itemAt(pos);
+  if (!item) {
+    return;
+  }
+
+  const QString name = item->text();
+
+  QMenu menu(this);
+  QAction *openRestic = menu.addAction("Open as restic repository...");
+  if (menu.exec(ui.remotes->mapToGlobal(pos)) == openRestic) {
+    openResticRepoFromRemote(name);
+  }
+}
+
+void MainWindow::manageResticRepos() {
+  QDialog dialog(this);
+  dialog.setWindowTitle("Restic repositories");
+  dialog.resize(620, 320);
+
+  auto *list = new QListWidget(&dialog);
+  QList<ResticRepo> repos = GetResticRepos();
+
+  auto reload = [&]() {
+    list->clear();
+    for (const ResticRepo &repo : repos) {
+      auto *entry = new QListWidgetItem(repo.name);
+      entry->setToolTip(repo.repository);
+      list->addItem(entry);
+    }
+  };
+  reload();
+
+  auto *buttons = new QDialogButtonBox(&dialog);
+  QPushButton *add = buttons->addButton("Add...", QDialogButtonBox::ActionRole);
+  QPushButton *edit =
+      buttons->addButton("Edit...", QDialogButtonBox::ActionRole);
+  QPushButton *remove =
+      buttons->addButton("Remove", QDialogButtonBox::DestructiveRole);
+  QPushButton *open = buttons->addButton("Open", QDialogButtonBox::AcceptRole);
+  buttons->addButton(QDialogButtonBox::Close);
+
+  auto updateButtons = [&]() {
+    const bool hasSelection = list->currentRow() >= 0;
+    edit->setEnabled(hasSelection);
+    remove->setEnabled(hasSelection);
+    open->setEnabled(hasSelection);
+  };
+  updateButtons();
+
+  QObject::connect(list, &QListWidget::currentRowChanged, &dialog,
+                   [&]() { updateButtons(); });
+
+  QObject::connect(add, &QPushButton::clicked, &dialog, [&]() {
+    ResticRepoDialog repoDialog(&dialog);
+    if (repoDialog.exec() == QDialog::Accepted) {
+      repos.append(repoDialog.repo());
+      SetResticRepos(repos);
+      reload();
+    }
+  });
+
+  QObject::connect(edit, &QPushButton::clicked, &dialog, [&]() {
+    const int row = list->currentRow();
+    if (row < 0) {
+      return;
+    }
+    ResticRepoDialog repoDialog(&dialog, repos[row]);
+    if (repoDialog.exec() == QDialog::Accepted) {
+      // The password may have been cached against the old repository string.
+      ForgetResticPassword(repos[row]);
+      repos[row] = repoDialog.repo();
+      SetResticRepos(repos);
+      reload();
+    }
+  });
+
+  QObject::connect(remove, &QPushButton::clicked, &dialog, [&]() {
+    const int row = list->currentRow();
+    if (row < 0) {
+      return;
+    }
+    if (QMessageBox::question(
+            &dialog, "Remove",
+            QString("Remove '%1' from the list?\n\nThe repository itself is "
+                    "not touched.")
+                .arg(repos[row].name)) != QMessageBox::Yes) {
+      return;
+    }
+    ForgetResticPassword(repos[row]);
+    repos.removeAt(row);
+    SetResticRepos(repos);
+    reload();
+  });
+
+  QObject::connect(open, &QPushButton::clicked, &dialog, &QDialog::accept);
+  QObject::connect(list, &QListWidget::itemActivated, &dialog,
+                   &QDialog::accept);
+  QObject::connect(buttons, &QDialogButtonBox::rejected, &dialog,
+                   &QDialog::reject);
+
+  auto *layout = new QVBoxLayout(&dialog);
+  layout->addWidget(list, 1);
+  layout->addWidget(buttons);
+
+  const int row = dialog.exec() == QDialog::Accepted ? list->currentRow() : -1;
+  if (row >= 0 && row < repos.size()) {
+    openResticRepo(repos[row]);
+  }
 }
 
 void MainWindow::rcloneListRemotes() {

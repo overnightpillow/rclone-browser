@@ -3,6 +3,7 @@
 #include "icon_cache.h"
 #include "job_options.h"
 #include "pch.h"
+#include "restic.h"
 #include "ui_main_window.h"
 
 class JobWidget;
@@ -47,6 +48,13 @@ private:
   bool getConfigPassword(QProcess *p);
 
   void addEmptyJobsMessage();
+
+  // Restic: opens a repository in its own tab, prompting for the password
+  // first when the repository has no password command configured.
+  void openResticRepo(const ResticRepo &repo);
+  void openResticRepoFromRemote(const QString &remote);
+  void manageResticRepos();
+  void showRemotesContextMenu(const QPoint &pos);
 
   void runItem(JobOptionsListWidgetItem *item, bool dryrun = false);
   void editSelectedTask();
