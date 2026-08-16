@@ -3,9 +3,9 @@ cmake_minimum_required(VERSION 3.21)
 file(READ "VERSION" RCLONE_BROWSER_VERSION)
 string(STRIP "${RCLONE_BROWSER_VERSION}" RCLONE_BROWSER_VERSION)
 
-project(rclone-remote-manager
+project(rclone-browser
   VERSION ${RCLONE_BROWSER_VERSION}
-  DESCRIPTION "Qt6 rclone remote manager with restic snapshot browsing"
+  DESCRIPTION "Qt6 rclone browser with restic snapshot browsing"
   LANGUAGES CXX
 )
 

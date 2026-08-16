@@ -1,12 +1,16 @@
-# Rclone Remote Manager
+# Rclone Browser v2
 
 A Qt6 desktop front-end for [rclone](https://rclone.org/), with read-only
 browsing of [restic](https://restic.net/) repositories.
 
-This is a fork of [kapitainsky/RcloneBrowser](https://github.com/kapitainsky/RcloneBrowser),
-which was last updated in December 2020. The original README is preserved as
-[README.upstream.md](README.upstream.md) and still describes most of the rclone
-functionality accurately.
+This continues [kapitainsky/RcloneBrowser](https://github.com/kapitainsky/RcloneBrowser),
+whose last release was 1.8.0 in February 2020. It is still Rclone Browser and
+still stores its settings under the same name, so **upgrading from 1.8.0 keeps
+your existing preferences and saved tasks** — the version bump marks the Qt6
+port and the restic support, not a rename.
+
+The original README is preserved as [README.upstream.md](README.upstream.md)
+and still describes most of the rclone functionality accurately.
 
 ## What this fork changes
 

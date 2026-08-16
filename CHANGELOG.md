@@ -1,4 +1,48 @@
 # Change Log
+
+## [2.0.0] - 2026-08-16
+
+First release of this fork. Upstream's last release was 1.8.0 in February 2020;
+2.0.0 marks the Qt6 port and the restic support, not a rename — the application
+is still Rclone Browser and still stores its settings under the same name, so
+existing preferences and saved tasks carry over untouched.
+
+-   NEW: read-only restic snapshot browsing. Browse snapshots, their file
+    trees, and restore to a local folder. Repositories can be reached through
+    an rclone remote already configured here (`rclone:remote:path`), so a
+    repository on S3, B2 or Storj needs no second copy of the credentials.
+    Right-click a remote to open a repository stored on it, or register
+    repositories by full restic URL under Restic → Repositories.
+-   NEW: restic repository passwords prefer a per-repository password command
+    (`RESTIC_PASSWORD_COMMAND`), so the password never passes through this
+    application. Without one you are prompted once per session; the password is
+    held in memory only and never written to the settings file.
+-   NEW: builds against Qt6 and CMake 3.21+. Upstream required Qt5 and declared
+    `cmake_minimum_required(VERSION 2.8)`, which CMake 4.x rejects outright.
+-   NEW: `-Werror` is opt-in via `-DRRM_WERROR=ON` rather than pinned on, so a
+    newer compiler cannot make the project unbuildable again.
+-   NEW: Gitea Actions CI replacing the dead Travis and AppVeyor configs.
+-   CHANGED: directory listings use a single `rclone lsjson` call instead of
+    `rclone lsd` plus `rclone lsl --max-depth 1` parsed with regular
+    expressions. Half the process spawns per expanded folder, and no more
+    text-scraping.
+-   CHANGED: modification times display in local time rather than whatever zone
+    rclone printed.
+-   FIXED: a failed directory listing was indistinguishable from an empty
+    directory; failures now show an error row with rclone's message.
+-   FIXED: on Linux, settings were written to `/rclone-browser/rclone-browser.ini`
+    at the filesystem root whenever `$XDG_CONFIG_HOME` was unset, which is the
+    normal case. Now falls back to `~/.config` per the XDG spec.
+-   FIXED: the rclone version check crashed the application on any version
+    string with a non-numeric component, such as `1.65.0-beta`.
+-   FIXED: file sizes below 10 bytes displayed as the literal string `0`.
+-   FIXED: `rclone config` on macOS wrote a shell script to a fixed,
+    world-readable `/tmp/rclone_config.command` and marked it executable, which
+    another user on the machine could pre-create. Now uses an unguessable
+    temporary path with owner-only permissions.
+-   FIXED: the macOS release script could not run on Apple Silicon, and
+    `macdeployqt` alone left the bundle loading Qt twice.
+
 ## [1.8.0][1.8.0] - 2020-02-17
 -   NEW: http(s) proxy configuration for rclone
 -   NEW: remotes icons size option selector
