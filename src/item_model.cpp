@@ -2,6 +2,7 @@
 #include "formatting.h"
 #include "icon_cache.h"
 #include "parsing.h"
+#include "theme.h"
 #include "utils.h"
 #include <algorithm>
 
@@ -250,6 +251,17 @@ QVariant ItemModel::data(const QModelIndex &index, int role) const {
       return QVariant::fromValue(Qt::AlignRight | Qt::AlignVCenter);
     }
     return QVariant();
+  }
+
+  // Size and Modified are context, not the thing being looked for. Muting and
+  // shrinking them lets the eye land on the name.
+  if (index.column() > 0 && item->state != Item::Special) {
+    if (role == Qt::ForegroundRole) {
+      return QVariant::fromValue(SecondaryTextColor(qApp->palette()));
+    }
+    if (role == Qt::FontRole) {
+      return QVariant::fromValue(SecondaryFont(qApp->font()));
+    }
   }
 
   if (role == Qt::DisplayRole) {

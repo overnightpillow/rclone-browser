@@ -1,4 +1,5 @@
 #include "main_window.h"
+#include "theme.h"
 #include "utils.h"
 
 int main(int argc, char *argv[]) {
@@ -11,6 +12,9 @@ int main(int argc, char *argv[]) {
   app.setApplicationName("rclone-browser");
   app.setOrganizationName("rclone-browser");
   app.setWindowIcon(QIcon(":/icons/icon.png"));
+
+  // Generated from the live palette and reapplied on theme change.
+  InstallTheme(&app);
 
 // initialize SSL libraries
 // see: https://github.com/linuxdeploy/linuxdeploy-plugin-qt/issues/57

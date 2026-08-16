@@ -16,9 +16,22 @@ ResticRepoDialog::ResticRepoDialog(QWidget *parent, const ResticRepo &initial)
       "Optional; leave empty to be prompted for the password");
 
   auto *form = new QFormLayout();
+  // Without this the fields stay at their size hint while the dialog is wide,
+  // which leaves a narrow column of controls floating in the middle and
+  // truncates the repository string -- the longest and most important value
+  // on the form.
+  form->setFieldGrowthPolicy(QFormLayout::ExpandingFieldsGrow);
+  form->setRowWrapPolicy(QFormLayout::DontWrapRows);
+  form->setLabelAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  form->setHorizontalSpacing(12);
+  form->setVerticalSpacing(8);
+
   form->addRow("Name", mName);
   form->addRow("Repository", mRepository);
   form->addRow("Password command", mPasswordCommand);
+
+  // The repository is the value most likely to be long.
+  mRepository->setMinimumWidth(320);
 
   auto *hint = new QLabel(
       "<small>Anything restic accepts after <tt>-r</tt>: a local path, "
@@ -36,8 +49,13 @@ ResticRepoDialog::ResticRepoDialog(QWidget *parent, const ResticRepo &initial)
       QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
 
   auto *layout = new QVBoxLayout(this);
+  layout->setContentsMargins(18, 16, 18, 14);
+  layout->setSpacing(14);
   layout->addLayout(form);
   layout->addWidget(hint);
+  // Keeps the buttons against the bottom edge rather than letting the help
+  // text and the buttons drift apart as the dialog grows.
+  layout->addStretch(1);
   layout->addWidget(buttons);
 
   QObject::connect(buttons, &QDialogButtonBox::accepted, this,

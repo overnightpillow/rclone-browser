@@ -1,5 +1,6 @@
 #include "restic_model.h"
 #include "formatting.h"
+#include "theme.h"
 #include "utils.h"
 
 // Folders first, then case-insensitive by name -- restic emits nodes in tree
@@ -185,6 +186,16 @@ QVariant ResticModel::data(const QModelIndex &index, int role) const {
 
   if (role == Qt::TextAlignmentRole && index.column() == 1) {
     return QVariant::fromValue(Qt::AlignRight | Qt::AlignVCenter);
+  }
+
+  // Matches the rclone tree: secondary columns muted and slightly smaller.
+  if (index.column() > 0 && !item->isPlaceholder) {
+    if (role == Qt::ForegroundRole) {
+      return QVariant::fromValue(SecondaryTextColor(qApp->palette()));
+    }
+    if (role == Qt::FontRole) {
+      return QVariant::fromValue(SecondaryFont(qApp->font()));
+    }
   }
 
   if (role == Qt::ToolTipRole && item->isSnapshot) {

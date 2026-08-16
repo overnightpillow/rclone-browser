@@ -36,6 +36,7 @@ set(HEADERS
   restic.h
   formatting.h
   parsing.h
+  theme.h
 )
 
 set(SOURCES
@@ -56,6 +57,7 @@ set(SOURCES
   list_of_job_options.cpp
   formatting.cpp
   parsing.cpp
+  theme.cpp
   restic.cpp
   restic_model.cpp
   restic_widget.cpp

@@ -258,6 +258,8 @@ void SetRclonePassword(const QString &rclonePassword) {
 void StyleTreeView(QTreeView *tree) {
   auto settings = GetSettings();
 
+  // Off by default: Qt stripes the entire viewport, not just the rows that
+  // exist, so a two-row listing renders thirty rows of empty zebra beneath it.
   tree->setAlternatingRowColors(
       settings->value("Settings/rowColors", false).toBool());
 

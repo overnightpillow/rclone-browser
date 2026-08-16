@@ -1,4 +1,5 @@
 #include "formatting.h"
+#include "theme.h"
 #include "restic.h"
 #include "utils.h"
 #include <QtTest>
@@ -19,6 +20,10 @@ private slots:
   void versionComparison();
   void versionWithNonNumericComponent();
   void resticRepoForRemote();
+
+  void themeAdaptsToPalette();
+  void themeHasNoHardcodedColours();
+  void themeDefinesSelectionColours();
 };
 
 void TestFormatting::sizeBelowTenBytes() {
@@ -123,6 +128,85 @@ void TestFormatting::resticRepoForRemote() {
            QString("rclone:storj:tank0/kevin"));
   QCOMPARE(ResticRepoForRemote("storj", QString()),
            QString("rclone:storj:"));
+}
+
+void TestFormatting::themeAdaptsToPalette() {
+  // Qt style sheets cannot reference palette roles, so the sheet is generated
+  // from the palette. If it did not actually vary, every colour in it would be
+  // fixed at author time and wrong in one of the two schemes.
+  QPalette light;
+  light.setColor(QPalette::WindowText, QColor(0, 0, 0));
+  light.setColor(QPalette::Window, QColor(255, 255, 255));
+  light.setColor(QPalette::Text, QColor(0, 0, 0));
+
+  QPalette dark;
+  dark.setColor(QPalette::WindowText, QColor(255, 255, 255));
+  dark.setColor(QPalette::Window, QColor(30, 30, 30));
+  dark.setColor(QPalette::Text, QColor(255, 255, 255));
+
+  const QString lightSheet = ThemeStyleSheet(light);
+  const QString darkSheet = ThemeStyleSheet(dark);
+
+  QVERIFY(!lightSheet.isEmpty());
+  QVERIFY(lightSheet != darkSheet);
+
+  // The hairline derives from WindowText, so each scheme names its own.
+  QVERIFY(lightSheet.contains("rgba(0,0,0"));
+  QVERIFY(darkSheet.contains("rgba(255,255,255"));
+
+  // Secondary text must differ too, or muted columns vanish in one scheme.
+  QVERIFY(SecondaryTextColor(light) != SecondaryTextColor(dark));
+}
+
+void TestFormatting::themeHasNoHardcodedColours() {
+  QPalette palette;
+  palette.setColor(QPalette::WindowText, QColor(10, 20, 30));
+
+  QString sheet = ThemeStyleSheet(palette);
+
+  // Strip CSS comments first: the assertion is about declarations, and prose
+  // explaining why the old header looked grey is not a hardcoded colour.
+  static const QRegularExpression comments(R"(/\*.*?\*/)",
+                                           QRegularExpression::DotMatchesEverythingOption);
+  sheet.remove(comments);
+
+  // Hex literals and named colours are the failure mode this guards against:
+  // they survive a theme change and look wrong in the other scheme.
+  QVERIFY(!sheet.contains("#"));
+  QVERIFY(!sheet.contains("white"));
+  QVERIFY(!sheet.contains("black"));
+  QVERIFY(!sheet.contains("gray"));
+  QVERIFY(!sheet.contains("grey"));
+
+  // What it should contain: colours built from the palette at runtime.
+  QVERIFY(sheet.contains("rgba(10,20,30"));
+}
+
+void TestFormatting::themeDefinesSelectionColours() {
+  QPalette palette;
+  palette.setColor(QPalette::Text, QColor(0, 0, 0));
+  palette.setColor(QPalette::Active, QPalette::Highlight, QColor(0, 90, 200));
+  palette.setColor(QPalette::Active, QPalette::HighlightedText,
+                   QColor(255, 255, 255));
+
+  const QString sheet = ThemeStyleSheet(palette);
+
+  // Styling ::item at all moves Qt onto the style sheet drawing path, which
+  // stops painting the selection background while the text still switches to
+  // HighlightedText. That produced white text on a white row -- selected
+  // entries were invisible. If ::item is styled, :selected must be too.
+  QVERIFY(sheet.contains("::item"));
+  QVERIFY(sheet.contains("::item:selected"));
+
+  // Both halves: a background to sit on, and a colour to read against it.
+  const int selectedAt = sheet.indexOf("::item:selected");
+  const QString selectedRules = sheet.mid(selectedAt, 400);
+  QVERIFY(selectedRules.contains("background:"));
+  QVERIFY(selectedRules.contains("color:"));
+
+  // The selection colours must come from the palette, not be invented.
+  QVERIFY(sheet.contains("rgba(0,90,200"));
+  QVERIFY(sheet.contains("rgba(255,255,255"));
 }
 
 QTEST_MAIN(TestFormatting)
