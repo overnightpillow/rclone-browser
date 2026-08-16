@@ -1,5 +1,5 @@
 
-#define MyAppName "Rclone Browser"
+#define MyAppName "rclone-browser"
 #define MyAppPublisher "kapitainsky"
 #define MyAppURL "https://github.com/kapitainsky/RcloneBrowser"
 #define MyAppExeName "RcloneBrowser.exe"

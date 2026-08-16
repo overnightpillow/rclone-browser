@@ -1,5 +1,5 @@
 [Desktop Entry]
-Name=Rclone Browser
+Name=rclone-browser
 Comment=Simple cross-platform GUI for rclone
 Exec=rclone-browser
 Icon=rclone-browser

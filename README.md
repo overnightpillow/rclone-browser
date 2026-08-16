@@ -7,7 +7,7 @@ browsing of [restic](https://restic.net/) repositories.
 restic projects.*
 
 This continues [kapitainsky/RcloneBrowser](https://github.com/kapitainsky/RcloneBrowser),
-whose last release was 1.8.0 in February 2020. It is still Rclone Browser and
+whose last release was 1.8.0 in February 2020. It is still the same application and
 still stores its settings under the same name, so **upgrading from 1.8.0 keeps
 your existing preferences and saved tasks** — the version bump marks the Qt6
 port and the restic support, not a rename.

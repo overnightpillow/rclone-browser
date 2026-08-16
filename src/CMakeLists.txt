@@ -117,7 +117,7 @@ elseif(APPLE)
   set_target_properties(rclone-browser PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist"
     MACOSX_BUNDLE_GUI_IDENTIFIER "com.overnightpillow.rclone-browser"
-    MACOSX_BUNDLE_BUNDLE_NAME "Rclone Browser"
+    MACOSX_BUNDLE_BUNDLE_NAME "rclone-browser"
     MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
     MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
 else()

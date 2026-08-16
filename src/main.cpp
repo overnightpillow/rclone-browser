@@ -8,7 +8,7 @@ int main(int argc, char *argv[]) {
   // the manual environment-variable probing it needed is gone with it.
   QApplication app(argc, argv);
 
-  //  app.setApplicationDisplayName("Rclone Browser");
+  //  app.setApplicationDisplayName("rclone-browser");
   app.setApplicationName("rclone-browser");
   app.setOrganizationName("rclone-browser");
   app.setWindowIcon(QIcon(":/icons/icon.png"));
@@ -70,7 +70,7 @@ int main(int argc, char *argv[]) {
   settings->setValue("Settings/darkModeIni", darkMode);
 
 
-  // enforce one instance of Rclone Browser per user
+  // enforce one instance of rclone-browser per user
   QString tmpDir;
   QString applicationNameBase;
   QFileInfo applicationPath;
