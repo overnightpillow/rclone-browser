@@ -3,6 +3,9 @@
 A Qt6 desktop front-end for [rclone](https://rclone.org/), with read-only
 browsing of [restic](https://restic.net/) repositories.
 
+*An independent project, not affiliated with or endorsed by the rclone or
+restic projects.*
+
 This continues [kapitainsky/RcloneBrowser](https://github.com/kapitainsky/RcloneBrowser),
 whose last release was 1.8.0 in February 2020. It is still Rclone Browser and
 still stores its settings under the same name, so **upgrading from 1.8.0 keeps
@@ -230,3 +233,6 @@ available.
 ## License
 
 MIT, inheriting upstream's copyright notices. See [LICENSE](LICENSE).
+
+The application icon is rclone's logo, designed by Andreas Chlupka and carried
+over from upstream.

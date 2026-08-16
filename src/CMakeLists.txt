@@ -110,8 +110,16 @@ elseif(APPLE)
   set_source_files_properties(icon.icns PROPERTIES
     MACOSX_PACKAGE_LOCATION "Resources")
   target_sources(rclone-browser PRIVATE icon.icns)
+  # Upstream's Info.plist declared no CFBundleIdentifier at all. macOS keys
+  # TCC permission grants (Files & Folders, Full Disk Access) off the bundle
+  # identifier, and notarization requires one, so this string must stay stable
+  # across releases: changing it makes every user re-grant access.
   set_target_properties(rclone-browser PROPERTIES
-    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist")
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "com.overnightpillow.rclone-browser"
+    MACOSX_BUNDLE_BUNDLE_NAME "Rclone Browser"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}")
 else()
   install(TARGETS rclone-browser RUNTIME DESTINATION bin)
 

@@ -1,13 +1,18 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Copyright 2019 Dariusz Bogdanski <dariuszb@me.com> -->
 <component type="desktop-application">
-  <id>org.kapitainsky.rclone_browser</id>
+  <!-- Was org.kapitainsky.rclone_browser. A reverse-DNS id is a claim about
+       who publishes the build, so it moves with the maintainer; it is not the
+       application name, which is unchanged, and it has no bearing on where
+       QSettings stores preferences. -->
+  <id>com.overnightpillow.rclone-browser</id>
+  <launchable type="desktop-id">rclone-browser.desktop</launchable>
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
   <name>Rclone Browser</name>
-  <summary>Simple cross platfrom GUI for rclone command line</summary>
+  <summary>Cross-platform GUI for the rclone command line tool</summary>
   <description>
-    <p>Rclone Browser is a cross-platform Qt5 GUI for Rclone, a command line tool to synchronize (and mount) files from remote cloud storage services like Google Drive, OneDrive, Nextcloud, Dropbox, Amazon Drive and S3, Mega, and others. Use it to copy a file from one cloud storage service to another, from a cloud storage to your system or the other way around, and to mount some cloud storage on your system with a single click.</p>
+    <p>Rclone Browser is a cross-platform Qt6 GUI for Rclone, a command line tool to synchronize (and mount) files from remote cloud storage services like Google Drive, OneDrive, Nextcloud, Dropbox, Amazon Drive and S3, Mega, and others. Use it to copy a file from one cloud storage service to another, from a cloud storage to your system or the other way around, and to mount some cloud storage on your system with a single click.</p>
     <p> - Allows to browse and modify any rclone remote, including encrypted ones</p>
     <p> - Uses same configuration file as rclone, no extra configuration required</p>
     <p> - Supports custom location and encryption for .rclone.conf configuration file</p>
@@ -27,7 +32,10 @@
     <p> - For remotes supporting public link sharing has an option (right-click menu) to fetch it</p>
     <p> - Supports tasks. Created jobs can be saved and run or edited later</p>
     <p> - Configurable dark mode for all systems</p>
+    <p> - Browses restic repositories read-only, including repositories reached through an rclone remote</p>
   </description>
+  <!-- Still upstream's screenshots, taken before the tab unification. Replace
+       with images of this fork's UI, self-hosted, before any distro packaging. -->
   <screenshots>
     <screenshot type="default">
       <image>https://github.com/kapitainsky/RcloneBrowser/wiki/images/IMGdefault.png</image>
@@ -36,15 +44,15 @@
       <image>https://github.com/kapitainsky/RcloneBrowser/wiki/images/IMGtransfer.png</image>
     </screenshot>
   </screenshots>
-  <url type="homepage">https://github.com/kapitainsky/RcloneBrowser/</url>
-  <url type="bugtracker">https://github.com/kapitainsky/RcloneBrowser/issues/</url>
-  <url type="faq">https://github.com/kapitainsky/RcloneBrowser/wiki</url>
-  <url type="help">https://github.com/kapitainsky/RcloneBrowser/issues/</url>
+  <url type="homepage">https://gitea.ironlake.net/kevin/rclone-browser</url>
+  <url type="bugtracker">https://gitea.ironlake.net/kevin/rclone-browser/issues</url>
+  <url type="help">https://gitea.ironlake.net/kevin/rclone-browser</url>
   <releases>
-    <release version="1.6.0" date="2019-10-30" />
+    <release version="2.0.0" date="2026-08-16" />
+    <release version="1.8.0" date="2020-02-17" />
   </releases>
-  <developer_name>Dariusz Bogdanski and contributors</developer_name>
-  <update_contact>dariuszb@me.com</update_contact>
+  <developer_name>Kevin Versteeg, continuing work by kapitainsky, Martins Mozeiko, Dariusz Bogdanski and contributors</developer_name>
+  <update_contact>overnightpillow@proton.me</update_contact>
   <provides>
     <binary>rclone-browser</binary>
   </provides>
