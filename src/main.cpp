@@ -195,7 +195,7 @@ int main(int argc, char *argv[]) {
     // if already running display warning and quit
     QMessageBox msgBox;
     msgBox.setIcon(QMessageBox::Warning);
-    msgBox.setText("Rclone Browser is already running."
+    msgBox.setText("rclone-browser is already running."
                    "\r\n\nOnly one instance is allowed.");
     msgBox.exec();
     return static_cast<int>(

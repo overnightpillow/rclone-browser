@@ -18,9 +18,9 @@ MainWindow::MainWindow() {
   ui.setupUi(this);
 
   if (IsPortableMode()) {
-    this->setWindowTitle("Rclone Browser - portable mode");
+    this->setWindowTitle("rclone-browser - portable mode");
   } else {
-    this->setWindowTitle("Rclone Browser");
+    this->setWindowTitle("rclone-browser");
   }
 
 #if defined(Q_OS_WIN)
@@ -208,7 +208,7 @@ MainWindow::MainWindow() {
 
   QObject::connect(ui.about, &QAction::triggered, this, [=]() {
     QMessageBox::about(
-        this, "Rclone Browser",
+        this, "rclone-browser",
         QString(
             R"(<h3>GUI for rclone, v)" RCLONE_BROWSER_VERSION "</h3>"
             R"(<p>Copyright &copy; 2019</p>)"
@@ -667,7 +667,7 @@ void MainWindow::rcloneGetVersion() {
                   QMessageBox::information(
                       this, "",
                       QString(
-                          R"(<p>New Rclone Browser version is available</p>)"
+                          R"(<p>New rclone-browser version is available</p>)"
                           R"(<p>You have: v)" RCLONE_BROWSER_VERSION "<br />"
                           R"(New version: v)" +
                           rclone_browser_latest_version_no +
@@ -1217,7 +1217,7 @@ bool MainWindow::canClose() {
   showNormal();
 
   int button =
-      QMessageBox::question(this, "Rclone Browser",
+      QMessageBox::question(this, "rclone-browser",
                             QString("There are %1 job(s) running.\n"
                                     "Do you want to stop them and quit?")
                                 .arg(mJobCount),
