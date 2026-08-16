@@ -19,6 +19,12 @@ signals:
   void addMount(const QString &remote, const QString &folder);
   void addStream(const QString &remote, const QString &stream);
 
+  // A folder in the tree may itself be a restic repository. MainWindow owns
+  // the repository list and password handling, so the request is forwarded
+  // rather than handled here.
+  void openRestic(const QString &remote, const QString &path);
+  void saveRestic(const QString &remote, const QString &path);
+
 private:
   Ui::RemoteWidget ui;
 };

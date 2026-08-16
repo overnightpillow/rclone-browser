@@ -663,7 +663,28 @@ QString root = isLocal ? "/" : QString();
         menu.addAction(ui.upload);
         menu.addAction(ui.download);
         menu.addAction(ui.link);
-        menu.exec(ui.tree->viewport()->mapToGlobal(pos));
+
+        // Only a folder can be a restic repository, and only on a real remote
+        // -- a local path is reachable by restic directly without rclone.
+        QAction *openRestic = nullptr;
+        QAction *saveRestic = nullptr;
+        const auto selected = ui.tree->selectionModel()->selectedRows();
+        if (!isLocal && !selected.isEmpty() &&
+            model->isFolder(selected.front())) {
+          menu.addSeparator();
+          openRestic = menu.addAction("Open as Restic Repository");
+          saveRestic = menu.addAction("Save as Restic Repository...");
+        }
+
+        QAction *chosen = menu.exec(ui.tree->viewport()->mapToGlobal(pos));
+
+        if (chosen != nullptr && chosen == openRestic) {
+          emit this->openRestic(remote,
+                                model->path(selected.front()).path());
+        } else if (chosen != nullptr && chosen == saveRestic) {
+          emit this->saveRestic(remote,
+                                model->path(selected.front()).path());
+        }
       });
 
   if (isLocal) {
