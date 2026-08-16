@@ -507,7 +507,8 @@ QString root = isLocal ? "/" : QString();
         return;
       }
 
-      QRegExp re(R"(^(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)");
+      QRegularExpression re(QRegularExpression::anchoredPattern(
+          R"((\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+))"));
 
       QProcess process;
       UseRclonePassword(&process);
@@ -523,22 +524,22 @@ QString root = isLocal ? "/" : QString();
       QObject::connect(&progress, &ProgressDialog::outputAvailable, this,
                        [=](const QString &output) {
                          QTextStream out(file);
-                         out.setCodec("UTF-8");
+                         out.setEncoding(QStringConverter::Utf8);
 
                          for (const auto &line : output.split('\n')) {
-                           if (re.exactMatch(line.trimmed())) {
-                             QStringList cap = re.capturedTexts();
-
+                           auto match = re.match(line.trimmed());
+                           if (match.hasMatch()) {
                              if (txt) {
-                               out << cap[3] << '\n';
+                               out << match.captured(3) << '\n';
                              } else {
-                               QString name = cap[3];
+                               QString name = match.captured(3);
                                if (name.contains(' ') || name.contains(',') ||
                                    name.contains('"')) {
                                  name = '"' + name.replace("\"", "\"\"") + '"';
                                }
-                               out << name << ',' << '"' << cap[2] << '"' << ','
-                                   << cap[1].toULongLong() << '\n';
+                               out << name << ',' << '"' << match.captured(2)
+                                   << '"' << ','
+                                   << match.captured(1).toULongLong() << '\n';
                              }
                            }
                          }
@@ -557,7 +558,7 @@ QString root = isLocal ? "/" : QString();
              ? settings->setValue("Settings/driveShared", Qt::Checked)
              : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
-        qApp->setActiveWindow(this);
+        this->activateWindow();
         QDir destPath = model->path(parent);
         QString dest = QFileInfo(path.path()).isDir()
                            ? destPath.filePath(path.dirName())

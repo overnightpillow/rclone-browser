@@ -15,7 +15,7 @@ struct Item {
     }
   }
 
-  bool isLoading() const { return state == Loading1 || state == Loading2; }
+  bool isLoading() const { return state == Loading; }
 
   int num() const {
     Q_ASSERT(parent);
@@ -24,7 +24,9 @@ struct Item {
 
   Item *parent = nullptr;
 
-  enum State { Unknown, Loading1, Loading2, Ready, Special, LoadingIcon };
+  // Loading1/Loading2 used to track the two concurrent rclone processes
+  // (lsd + lsl) a single directory listing required; lsjson needs only one.
+  enum State { Unknown, Loading, Ready, Special, LoadingIcon };
 
   State state = Unknown;
   bool isFolder = false;
@@ -97,9 +99,6 @@ private:
 
   int mSortColumn;
   Qt::SortOrder mSortOrder;
-
-  QRegExp mRegExpFolder;
-  QRegExp mRegExpFile;
 
   Item *get(const QModelIndex &index) const;
   void load(const QPersistentModelIndex &parentIndex, Item *parent);

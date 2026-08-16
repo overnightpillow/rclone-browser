@@ -1,35 +1,6 @@
-cmake_minimum_required(VERSION 2.8)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
-if (NOT ${CMAKE_VERSION} VERSION_LESS "3.0.0")
-	cmake_policy(SET CMP0028 NEW)
-endif()
-if (NOT ${CMAKE_VERSION} VERSION_LESS "2.8.11")
-	cmake_policy(SET CMP0020 NEW)
-endif()
-
-if(WIN32)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /W4 /WX /wd4100 /wd4189")
-else()
-  add_definitions("-pedantic -Wall -Wextra -Werror -std=c++11")
-endif()
-
-if (APPLE)
-  set(CMAKE_OSX_DEPLOYMENT_TARGET 10.9)
-endif()
-
-project(rclone-browser)
-FIND_PACKAGE(Qt5Core REQUIRED)
-FIND_PACKAGE(Qt5Gui REQUIRED)
-FIND_PACKAGE(Qt5Widgets REQUIRED)
-FIND_PACKAGE(Qt5Network REQUIRED)
-
-if (WIN32)
-FIND_PACKAGE(Qt5WinExtras REQUIRED)
-elseif(APPLE)
-FIND_PACKAGE(Qt5MacExtras REQUIRED)
-endif()
-
-set(CMAKE_INCLUDE_CURRENT_DIR ON)
+qt_standard_project_setup()
 
 set(UI
   main_window.ui
@@ -43,7 +14,7 @@ set(UI
   preferences_dialog.ui
 )
 
-set(MOC
+set(HEADERS
   main_window.h
   remote_widget.h
   transfer_dialog.h
@@ -56,16 +27,12 @@ set(MOC
   icon_cache.h
   list_of_job_options.h
   item_model.h
-)
-
-set(OTHER
   pch.h
   utils.h
   job_options.h
 )
 
-set(SOURCE
-  pch.cpp
+set(SOURCES
   main.cpp
   main_window.cpp
   remote_widget.cpp
@@ -84,62 +51,54 @@ set(SOURCE
 )
 
 if(WIN32)
-  set(OTHER ${OTHER} resources.rc)
+  list(APPEND SOURCES resources.rc)
 elseif(APPLE)
-  set(OTHER ${OTHER} osx_helper.h)
-  set(SOURCE ${SOURCE} osx_helper.mm)
+  list(APPEND HEADERS osx_helper.h)
+  list(APPEND SOURCES osx_helper.mm)
 endif()
 
-set(QRC resources.qrc)
+qt_add_executable(rclone-browser
+  WIN32 MACOSX_BUNDLE
+  ${SOURCES} ${HEADERS} ${UI} resources.qrc
+)
 
-add_definitions(-DRCLONE_BROWSER_VERSION="${RCLONE_BROWSER_VERSION}")
+# AUTOUIC/AUTOMOC/AUTORCC replace the hand-rolled qt5_wrap_ui/qt5_wrap_cpp/
+# qt5_add_resources calls; qt_standard_project_setup enables them.
+target_include_directories(rclone-browser PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
-qt5_wrap_ui(UI_OUT ${UI})
-qt5_wrap_cpp(MOC_OUT ${MOC})
-qt5_add_resources(QRC_OUT ${QRC} OPTIONS "-no-compress")
+target_compile_definitions(rclone-browser PRIVATE
+  RCLONE_BROWSER_VERSION="${PROJECT_VERSION}"
+)
 
-source_group("" FILES ${SOURCE} ${MOC} ${UI} ${QRC} ${OTHER})
-source_group("Generated" FILES ${MOC_OUT} ${UI_OUT} ${MOC_OUT} ${QRC_OUT})
+target_precompile_headers(rclone-browser PRIVATE pch.h)
 
-MACRO(ADD_MSVC_PRECOMPILED_HEADER PrecompiledHeader PrecompiledSource SourcesVar)
-  IF(MSVC)
-    GET_FILENAME_COMPONENT(PrecompiledBasename ${PrecompiledHeader} NAME_WE)
-    SET(PrecompiledBinary "${CMAKE_CURRENT_BINARY_DIR}/${PrecompiledBasename}.pch")
-    SET(Sources ${${SourcesVar}})
-
-    SET_SOURCE_FILES_PROPERTIES(${PrecompiledSource}
-                                PROPERTIES COMPILE_FLAGS "/Yc\"${PrecompiledHeader}\" /Fp\"${PrecompiledBinary}\""
-                                           OBJECT_OUTPUTS "${PrecompiledBinary}")
-    SET_SOURCE_FILES_PROPERTIES(${Sources}
-                                PROPERTIES COMPILE_FLAGS "/Yu\"${PrecompiledHeader}\" /FI\"${PrecompiledHeader}\" /Fp\"${PrecompiledBinary}\""
-                                           OBJECT_DEPENDS "${PrecompiledBinary}")
-    # Add precompiled header to SourcesVar
-    LIST(APPEND ${SourcesVar} ${PrecompiledSource})
-  ENDIF(MSVC)
-ENDMACRO(ADD_MSVC_PRECOMPILED_HEADER)
-
-ADD_MSVC_PRECOMPILED_HEADER(pch.h pch.cpp SOURCE)
-ADD_MSVC_PRECOMPILED_HEADER(pch.h pch.cpp MOC_OUT)
+target_link_libraries(rclone-browser PRIVATE
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network
+)
 
 if(WIN32)
-  add_executable(RcloneBrowser WIN32 ${SOURCE} ${BACKEND} ${OTHER} ${MOC} ${MOC_OUT} ${UI_OUT} ${MOC_OUT} ${QRC_OUT})
-  target_link_libraries(RcloneBrowser Qt5::Widgets Qt5::Network Qt5::WinExtras)
+  # SHGetFileInfoW, used by icon_cache.cpp for per-extension shell icons.
+  target_link_libraries(rclone-browser PRIVATE shell32)
 elseif(APPLE)
-  set_source_files_properties(icon.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
-  add_executable(rclone-browser MACOSX_BUNDLE ${SOURCE} ${BACKEND} ${OTHER} ${MOC} ${MOC_OUT} ${UI_OUT} ${MOC_OUT} ${QRC_OUT} icon.icns)
-  target_link_libraries(rclone-browser Qt5::Widgets Qt5::Network Qt5::MacExtras ${COCOA_LIB})
-  set_target_properties(rclone-browser PROPERTIES MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist")
-
+  find_library(COCOA_LIB Cocoa REQUIRED)
+  # UniformTypeIdentifiers backs the iconForContentType: lookup in osx_helper.mm.
+  find_library(UTTYPE_LIB UniformTypeIdentifiers REQUIRED)
+  target_link_libraries(rclone-browser PRIVATE ${COCOA_LIB} ${UTTYPE_LIB})
+  set_source_files_properties(icon.icns PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources")
+  target_sources(rclone-browser PRIVATE icon.icns)
+  set_target_properties(rclone-browser PROPERTIES
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist")
 else()
-  add_executable(rclone-browser ${SOURCE} ${BACKEND} ${OTHER} ${MOC} ${MOC_OUT} ${UI_OUT} ${MOC_OUT} ${QRC_OUT})
-  target_link_libraries(rclone-browser Qt5::Widgets Qt5::Network)
-
   install(TARGETS rclone-browser RUNTIME DESTINATION bin)
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser.svg" DESTINATION "share/icons/hicolor/scalable/apps" RENAME "rclone-browser.svg")
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser-32x32.png" DESTINATION "share/icons/hicolor/32x32/apps" RENAME "rclone-browser.png")
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser-64x64.png" DESTINATION "share/icons/hicolor/64x64/apps" RENAME "rclone-browser.png")
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser-128x128.png" DESTINATION "share/icons/hicolor/128x128/apps" RENAME "rclone-browser.png")
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser-256x256.png" DESTINATION "share/icons/hicolor/256x256/apps" RENAME "rclone-browser.png")
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser-512x512.png" DESTINATION "share/icons/hicolor/512x512/apps" RENAME "rclone-browser.png")
-  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/../assets/rclone-browser.desktop" DESTINATION "share/applications")
+
+  set(ASSETS "${CMAKE_CURRENT_SOURCE_DIR}/../assets")
+  install(FILES "${ASSETS}/rclone-browser.svg"
+    DESTINATION "share/icons/hicolor/scalable/apps" RENAME "rclone-browser.svg")
+  foreach(SIZE 32 64 128 256 512)
+    install(FILES "${ASSETS}/rclone-browser-${SIZE}x${SIZE}.png"
+      DESTINATION "share/icons/hicolor/${SIZE}x${SIZE}/apps"
+      RENAME "rclone-browser.png")
+  endforeach()
+  install(FILES "${ASSETS}/rclone-browser.desktop" DESTINATION "share/applications")
 endif()

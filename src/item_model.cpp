@@ -17,14 +17,39 @@ static void advanceSpinner(QString &text) {
 
 QString getNiceSize(quint64 size) {
   static const char prefix[] = " KMGTPE";
-  for (int i = sizeof(prefix) - 2; i >= 0; i--) {
+  for (int i = sizeof(prefix) - 2; i >= 1; i--) {
     quint64 base = quint64(1) << (i * 10);
     if (size >= 10 * base) {
-      return QString("%1 %2").arg(size / base).arg(QChar(prefix[i])).trimmed();
+      return QString("%1 %2").arg(size / base).arg(QChar(prefix[i]));
     }
   }
-  return "0";
+  // Below 10 KiB, report the exact byte count. The loop used to run down to
+  // i == 0 with the same ">= 10 * base" test, so every size under 10 bytes fell
+  // through and rendered as the literal string "0".
+  return QString::number(size);
 }
+// lsjson reports RFC3339 timestamps ("2026-08-16T00:14:33.617734546-07:00").
+// The tree sorts the Modified column as a string, so the rendered form has to
+// stay fixed-width and lexicographically ordered: local time as
+// "yyyy-MM-dd HH:mm:ss".
+QString formatModTime(const QString &rfc3339) {
+  if (rfc3339.isEmpty()) {
+    return QString();
+  }
+
+  // Qt parses at most millisecond precision; rclone emits nanoseconds.
+  QString trimmed = rfc3339;
+  static const QRegularExpression subSecond(R"(\.(\d{3})\d*)");
+  trimmed.replace(subSecond, ".\\1");
+
+  const QDateTime parsed = QDateTime::fromString(trimmed, Qt::ISODateWithMs);
+  if (!parsed.isValid()) {
+    return rfc3339;
+  }
+
+  return parsed.toLocalTime().toString("yyyy-MM-dd HH:mm:ss");
+}
+
 } // namespace
 
 class ItemSorter {
@@ -80,10 +105,7 @@ private:
 
 ItemModel::ItemModel(IconCache *icons, const QString &remote, QObject *parent)
     : QAbstractItemModel(parent), mRemote(remote),
-      mFixedFont(QFontDatabase::systemFont(QFontDatabase::FixedFont)),
-      mRegExpFolder(
-          R"(^[\d-]+ (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d) \s*[\d-]+ (.+)$)"),
-      mRegExpFile(R"(^(\d+) (\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d)\.\d+ (.+)$)") {
+      mFixedFont(QFontDatabase::systemFont(QFontDatabase::FixedFont)) {
   QStyle *style = qApp->style();
   mDriveIcon = style->standardIcon(QStyle::SP_DriveNetIcon);
   mFolderIcon = style->standardIcon(QStyle::SP_DirIcon);
@@ -255,7 +277,7 @@ QVariant ItemModel::data(const QModelIndex &index, int role) const {
 
   if (role == Qt::TextAlignmentRole) {
     if (index.column() == 1) {
-      return Qt::AlignRight + Qt::AlignVCenter;
+      return QVariant::fromValue(Qt::AlignRight | Qt::AlignVCenter);
     }
     return QVariant();
   }
@@ -373,8 +395,7 @@ Item *ItemModel::get(const QModelIndex &index) const {
 }
 
 void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
-  auto lsd = new QProcess(this);
-  auto lsl = new QProcess(this);
+  auto ls = new QProcess(this);
 
   auto cache = new QVector<Item *>();
 
@@ -391,22 +412,89 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
     emit dataChanged(loadingIndex, loadingIndex, QVector<int>{Qt::DisplayRole});
   });
 
-  auto rcloneFinished = [=]() {
-    sender()->deleteLater();
+  auto rcloneFinished = [=](int exitCode, QProcess::ExitStatus exitStatus) {
+    ls->deleteLater();
 
-    parent->state =
-        parent->state == Item::Loading1 ? Item::Loading2 : Item::Ready;
-    if (parent->state != Item::Ready) {
-      return;
-    }
+    parent->state = Item::Ready;
 
     timer->stop();
     timer->deleteLater();
+
+    bool failed = exitStatus != QProcess::NormalExit || exitCode != 0;
+    QString errorText;
+    if (failed) {
+      // The old code ignored the exit code entirely, so a failed listing was
+      // indistinguishable from an empty directory.
+      errorText = QString::fromUtf8(ls->readAllStandardError()).trimmed();
+      if (errorText.isEmpty()) {
+        errorText = ls->errorString();
+      }
+    } else {
+      // lsjson emits one JSON array covering both directories and files, so a
+      // whole listing arrives from a single process and is parsed here instead
+      // of being scraped line by line from two.
+      QJsonParseError parseError;
+      const QJsonDocument doc =
+          QJsonDocument::fromJson(ls->readAllStandardOutput(), &parseError);
+
+      if (parseError.error != QJsonParseError::NoError || !doc.isArray()) {
+        failed = true;
+        errorText = "could not parse rclone lsjson output: " +
+                    parseError.errorString();
+      } else {
+        for (const QJsonValue &value : doc.array()) {
+          const QJsonObject entry = value.toObject();
+
+          Item *child = new Item();
+          child->parent = parent;
+          child->isFolder = entry.value("IsDir").toBool();
+          child->name = entry.value("Name").toString();
+          child->modified = formatModTime(entry.value("ModTime").toString());
+          if (!child->isFolder) {
+            // Directories report -1 (or a meaningless local inode size).
+            const qint64 size = entry.value("Size").toVariant().toLongLong();
+            child->size = size > 0 ? quint64(size) : 0;
+          }
+
+          cache->append(child);
+        }
+      }
+    }
 
     if (parent->isDeleted) {
       qDeleteAll(*cache);
       delete cache;
       delete parent;
+      return;
+    }
+
+    if (failed) {
+      qDeleteAll(*cache);
+      delete cache;
+
+      // Replace the listing with a single error row, so a failure is visible
+      // instead of looking like an empty directory.
+      if (!parent->childs.isEmpty()) {
+        emit beginRemoveRows(parentIndex, 0, parent->childs.count() - 1);
+        for (Item *node : parent->childs) {
+          if (node->isLoading() || node->state == Item::LoadingIcon) {
+            node->isDeleted = true;
+          } else {
+            delete node;
+          }
+        }
+        parent->childs.clear();
+        emit endRemoveRows();
+      }
+
+      Item *error = new Item();
+      error->state = Item::Special;
+      error->parent = parent;
+      error->name = "... error: " + errorText.section('\n', -1).trimmed();
+
+      emit beginInsertRows(parentIndex, 0, 0);
+      parent->childs.append(error);
+      emit endInsertRows();
       return;
     }
 
@@ -476,68 +564,23 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
     }
   };
 
-  QObject::connect(lsd,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
-                   this, rcloneFinished);
-  QObject::connect(lsl,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
-                   this, rcloneFinished);
+  QObject::connect(ls, &QProcess::finished, this, rcloneFinished);
 
-  QObject::connect(lsd, &QProcess::readyRead, this, [=]() {
-    while (lsd->canReadLine()) {
-      if (mRegExpFolder.exactMatch(lsd->readLine().trimmed())) {
-        QStringList cap = mRegExpFolder.capturedTexts();
-
-        Item *child = new Item();
-        child->isFolder = true;
-        child->parent = parent;
-        child->name = cap[2];
-        child->modified = cap[1];
-
-        cache->append(child);
-      }
-    }
-  });
-
-  QObject::connect(lsl, &QProcess::readyRead, this, [=]() {
-    while (lsl->canReadLine()) {
-      if (mRegExpFile.exactMatch(lsl->readLine().trimmed())) {
-        QStringList cap = mRegExpFile.capturedTexts();
-
-        Item *child = new Item();
-        child->parent = parent;
-        child->name = cap[3];
-        child->modified = cap[2];
-        child->size = cap[1].toULongLong();
-
-        cache->append(child);
-      }
-    }
-  });
-
-  parent->state = Item::Loading1;
+  parent->state = Item::Loading;
 
   emit beginInsertRows(parentIndex, 0, 0);
   parent->childs.prepend(loading);
   emit endInsertRows();
 
   timer->start(100);
-  UseRclonePassword(lsd);
-  UseRclonePassword(lsl);
+  UseRclonePassword(ls);
 
-  lsd->start(GetRclone(),
-             QStringList() << "lsd" << GetRcloneConf() << GetDriveSharedWithMe()
-                           << GetShowHidden() << GetDefaultRcloneOptionsList()
-                           << mRemote + ":" + parent->path.path(),
-             QIODevice::ReadOnly);
-  lsl->start(GetRclone(),
-             QStringList() << "lsl" << GetRcloneConf() << GetDriveSharedWithMe()
-                           << GetShowHidden() << "--max-depth"
-                           << "1" << GetDefaultRcloneOptionsList()
-                           << mRemote + ":" + parent->path.path(),
-             QIODevice::ReadOnly);
+  ls->start(GetRclone(),
+            QStringList() << "lsjson" << GetRcloneConf()
+                          << GetDriveSharedWithMe() << GetShowHidden()
+                          << GetDefaultRcloneOptionsList()
+                          << mRemote + ":" + parent->path.path(),
+            QIODevice::ReadOnly);
 }
 
 void ItemModel::sortRecursive(Item *item, const ItemSorter &sorter) {

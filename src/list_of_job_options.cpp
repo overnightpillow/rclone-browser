@@ -3,7 +3,7 @@
 #include <qdir.h>
 #include <qlogging.h>
 #include <qstandardpaths.h>
-#include <utils.h>
+#include "utils.h"
 
 static QDataStream &operator>>(QDataStream &dataStream, JobOptions &jo);
 static QDataStream &operator<<(QDataStream &dataStream, JobOptions &jo);
@@ -78,7 +78,7 @@ QFile *ListOfJobOptions::GetPersistenceFile(QIODevice::OpenModeFlag mode) {
 
     // get data location folder from Qt  - OS dependend
     outputDir =
-        QDir(QStandardPaths::writableLocation(QStandardPaths::DataLocation));
+        QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation));
   }
 
   if (!outputDir.exists()) {

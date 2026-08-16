@@ -35,11 +35,13 @@ void IconCache::getIcon(Item *item, const QPersistentModelIndex &parent) {
                        FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
                        SHGFI_ICON | SHGFI_USEFILEATTRIBUTES) &&
         info.hIcon) {
-      icon = QtWin::fromHICON(info.hIcon);
+      // QtWinExtras' QtWin::fromHICON is gone in Qt6; QImage gained the
+      // conversion directly.
+      icon = QIcon(QPixmap::fromImage(QImage::fromHICON(info.hIcon)));
       DestroyIcon(info.hIcon);
     }
 #elif defined(Q_OS_MACOS)
-    icon = osxGetIcon(ext.toUtf8().constData());
+    icon = osxGetIcon(ext);
 #else
     QMimeType mime = mMimeDatabase.mimeTypeForFile(
         item->name, QMimeDatabase::MatchExtension);

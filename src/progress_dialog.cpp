@@ -28,8 +28,7 @@ ProgressDialog::ProgressDialog(const QString &title, const QString &operation,
                    });
 
   QObject::connect(process,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
+                   &QProcess::finished,
                    this, [=](int code, QProcess::ExitStatus status) {
                      if (status == QProcess::NormalExit && code == 0) {
                        if (close) {

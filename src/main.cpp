@@ -3,16 +3,8 @@
 
 int main(int argc, char *argv[]) {
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
-  static const char ENV_VAR_QT_DEVICE_PIXEL_RATIO[] = "QT_DEVICE_PIXEL_RATIO";
-  if (!qEnvironmentVariableIsSet(ENV_VAR_QT_DEVICE_PIXEL_RATIO) &&
-      !qEnvironmentVariableIsSet("QT_AUTO_SCREEN_SCALE_FACTOR") &&
-      !qEnvironmentVariableIsSet("QT_SCALE_FACTOR") &&
-      !qEnvironmentVariableIsSet("QT_SCREEN_SCALE_FACTORS")) {
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-  }
-#endif
-
+  // Qt6 always enables high-DPI scaling; AA_EnableHighDpiScaling is a no-op and
+  // the manual environment-variable probing it needed is gone with it.
   QApplication app(argc, argv);
 
   //  app.setApplicationDisplayName("Rclone Browser");
@@ -96,24 +88,24 @@ int main(int argc, char *argv[]) {
   if (IsPortableMode()) {
 
     //  qDebug() << QString("isPortable is true");
-    //  applicationPath = qApp->applicationFilePath();
+    //  applicationPath = QFileInfo(qApp->applicationFilePath());
 #ifdef Q_OS_MACOS
     // on macOS excecutable file is located in
     // ./rclone-browser.app/Contents/MasOS/
     // to get actual bundle folder we have
     // to traverse three levels up
-    applicationPath = qApp->applicationFilePath();
+    applicationPath = QFileInfo(qApp->applicationFilePath());
     tmpDir = applicationPath.absolutePath() + "/../../..";
 
     // get bundle name
-    QFileInfo MacOSPath = applicationPath.dir().path();
-    QFileInfo ContentsPath = MacOSPath.dir().path();
-    appBundlePath = ContentsPath.dir().path();
+    QFileInfo MacOSPath{applicationPath.dir().path()};
+    QFileInfo ContentsPath{MacOSPath.dir().path()};
+    appBundlePath = QFileInfo(ContentsPath.dir().path());
 
 #else
     // not macOS
 #ifdef Q_OS_WIN
-    applicationPath = qApp->applicationFilePath();
+    applicationPath = QFileInfo(qApp->applicationFilePath());
     tmpDir = applicationPath.absolutePath();
 #else
     QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");

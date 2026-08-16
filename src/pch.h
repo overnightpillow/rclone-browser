@@ -12,14 +12,15 @@
 #include <QtNetwork>
 #include <QtWidgets>
 
-#if defined(Q_OS_WIN32)
-#include <QtWinExtras>
-#endif
+#if defined(Q_OS_WIN)
+// QtWinExtras (removed in Qt6) used to pull these in transitively; icon_cache.cpp
+// needs SHGetFileInfoW and CoInitializeEx directly.
+#include <windows.h>
 
-#ifdef Q_OS_MACOS
-#include <QtMacExtras>
+#include <objbase.h>
+#include <shellapi.h>
 #endif
 
 #ifdef _MSC_VER
-#pragma warning pop
+#pragma warning(pop)
 #endif

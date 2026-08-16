@@ -391,8 +391,7 @@ void MainWindow::rcloneGetVersion() {
 
   QObject::connect(
       p,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
+      &QProcess::finished,
       this, [=](int code, QProcess::ExitStatus) {
         if (code == 0) {
           QString version = p->readAllStandardOutput().trimmed();
@@ -419,7 +418,7 @@ void MainWindow::rcloneGetVersion() {
 #if defined(Q_OS_WIN32)
           // check if required version
           unsigned int result =
-              compareVersion(rclone_version_no.toStdString(), "1.50");
+              compareVersion(rclone_version_no, "1.50");
 
           if (result == 2) {
             QMessageBox::warning(
@@ -432,28 +431,25 @@ void MainWindow::rcloneGetVersion() {
           };
 #endif
 
-          QStringList lines = version.split("\n", QString::SkipEmptyParts);
+          QStringList lines = version.split("\n", Qt::SkipEmptyParts);
           QString rclone_info2;
           QString rclone_info3;
 
-          int counter = 0;
-          foreach (QString line, lines) {
-            line = line.trimmed();
-            if (counter == 1)
-              rclone_info2 = line.replace("- ", "");
-            if (counter == 2)
-              rclone_info3 = line.replace("- ", "");
-            counter++;
-          };
+          if (lines.size() > 1) {
+            rclone_info2 = lines[1].trimmed().replace("- ", "");
+          }
+          if (lines.size() > 2) {
+            rclone_info3 = lines[2].trimmed().replace("- ", "");
+          }
 
           QFileInfo appBundlePath;
 #ifdef Q_OS_MACOS
           if (IsPortableMode()) {
 
-            QFileInfo applicationPath = qApp->applicationFilePath();
-            QFileInfo MacOSPath = applicationPath.dir().path();
-            QFileInfo ContentsPath = MacOSPath.dir().path();
-            appBundlePath = ContentsPath.dir().path();
+            QFileInfo applicationPath = QFileInfo(qApp->applicationFilePath());
+            QFileInfo MacOSPath{applicationPath.dir().path()};
+            QFileInfo ContentsPath{MacOSPath.dir().path()};
+            appBundlePath = QFileInfo(ContentsPath.dir().path());
 
             mStatusMessage->setText(
                 rclone_info1 + " in " +
@@ -578,8 +574,7 @@ void MainWindow::rcloneGetVersion() {
 
                 // check if new version available and if yes display information
                 unsigned int result =
-                    compareVersion(rclone_latest_version_no.toStdString(),
-                                   rclone_version_no.toStdString());
+                    compareVersion(rclone_latest_version_no, rclone_version_no);
                 // latest version is greater than current
                 if (result == 1) {
 
@@ -655,9 +650,8 @@ void MainWindow::rcloneGetVersion() {
                     rclone_browser_latest_version_no.trimmed();
 
                 // check if new version available and if yes display information
-                unsigned int result = compareVersion(
-                    rclone_browser_latest_version_no.toStdString(),
-                    RCLONE_BROWSER_VERSION);
+                unsigned int result = compareVersion(rclone_browser_latest_version_no,
+                                                     RCLONE_BROWSER_VERSION);
                 // latest version is greater than current
                 if (result == 1) {
                   QMessageBox::information(
@@ -706,8 +700,7 @@ void MainWindow::rcloneConfig() {
   QProcess *p = new QProcess(this);
 
   QObject::connect(p,
-                   static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-                       &QProcess::finished),
+                   &QProcess::finished,
                    this, [=](int code, QProcess::ExitStatus) {
                      if (code == 0) {
                        emit rcloneListRemotes();
@@ -728,14 +721,30 @@ void MainWindow::rcloneConfig() {
 #endif
 
 #elif defined(Q_OS_MACOS)
-  auto tmp = new QFile("/tmp/rclone_config.command");
-  tmp->open(QIODevice::WriteOnly);
-  QTextStream(tmp) << "#!/bin/sh\n" << terminalRcloneCmd << "\n";
+  // The script is launched via `open`, so it has to outlive this scope, but it
+  // must not sit at a predictable world-writable path: another user on the
+  // machine could pre-create /tmp/rclone_config.command and have it run.
+  // QTemporaryFile picks an unguessable name and creates it 0600.
+  auto tmp = new QTemporaryFile(
+      QDir(QDir::tempPath()).filePath("rclone_config_XXXXXX.command"), this);
+  tmp->setAutoRemove(false);
+  if (!tmp->open()) {
+    QMessageBox::warning(this, "Error",
+                         "Could not create a temporary script to launch rclone "
+                         "config:\n" +
+                             tmp->errorString());
+    delete tmp;
+    p->deleteLater();
+    return;
+  }
+  {
+    QTextStream out(tmp);
+    out << "#!/bin/sh\n" << terminalRcloneCmd << "\n";
+  }
   tmp->close();
+  // Owner-only: the script's argv can carry the config path.
   tmp->setPermissions(QFileDevice::ReadUser | QFileDevice::WriteUser |
-                      QFileDevice::ExeUser | QFileDevice::ReadGroup |
-                      QFileDevice::ExeGroup | QFileDevice::ReadOther |
-                      QFileDevice::ExeOther);
+                      QFileDevice::ExeUser);
   p->setProgram("open");
   p->setArguments(QStringList() << tmp->fileName());
 #else
@@ -782,8 +791,7 @@ void MainWindow::rcloneListRemotes() {
 
   QObject::connect(
       p,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
+      &QProcess::finished,
       this, [=](int code, QProcess::ExitStatus) {
         if (code == 0) {
           QStyle *style = qApp->style();
@@ -1169,8 +1177,7 @@ void MainWindow::addStream(const QString &remote, const QString &stream) {
 
   QObject::connect(
       player,
-      static_cast<void (QProcess::*)(int, QProcess::ExitStatus)>(
-          &QProcess::finished),
+      &QProcess::finished,
       this, [=](int status, QProcess::ExitStatus) {
         player->deleteLater();
         if (status != 0 && player->error() == QProcess::FailedToStart) {
@@ -1214,7 +1221,9 @@ void MainWindow::addStream(const QString &remote, const QString &stream) {
   ui.jobs->insertWidget(1, line);
   ui.tabs->setTabText(1, QString("Jobs (%1)").arg(++mJobCount));
 
-  player->start(stream, QProcess::ReadOnly);
+  // Qt6 removed the command-splitting start() overload; startCommand() is the
+  // direct replacement and keeps the same quote-aware argument splitting.
+  player->startCommand(stream, QProcess::ReadOnly);
   UseRclonePassword(rclone);
   rclone->start(GetRclone(),
                 QStringList() << "cat" << GetRcloneConf() << remote,

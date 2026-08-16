@@ -4,60 +4,67 @@ static QString gRclone;
 static QString gRcloneConf;
 static QString gRclonePassword;
 
-// Software versions comparison
-// source: https://helloacm.com/how-to-compare-version-numbers-in-c/
-std::vector<std::string> split(const std::string &s, char d) {
-  std::vector<std::string> r;
-  int j = 0;
-  for (unsigned int i = 0; i < s.length(); i++) {
-    if (s[i] == d) {
-      r.push_back(s.substr(j, i - j));
-      j = i + 1;
-    }
+namespace {
+
+// Leading integer of a version component. The previous implementation used
+// std::stoi, which throws on anything non-numeric -- an rclone version such as
+// "1.65.0-beta" was enough to terminate the application.
+unsigned int versionPart(const QString &part) {
+  int end = 0;
+  while (end < part.size() && part.at(end).isDigit()) {
+    ++end;
   }
-  r.push_back(s.substr(j));
-  return r;
+  if (end == 0) {
+    return 0;
+  }
+  return part.left(end).toUInt();
 }
 
-unsigned int compareVersion(std::string version1, std::string version2) {
-  auto v1 = split(version1, '.');
-  auto v2 = split(version2, '.');
-  unsigned int max = v1.size() > v2.size() ? v1.size() : v2.size();
-  // pad the shorter version string
-  if (v1.size() != max) {
-    for (unsigned int i = max - v1.size(); i--;) {
-      v1.push_back("0");
-    }
-  } else {
-    for (unsigned int i = max - v2.size(); i--;) {
-      v2.push_back("0");
-    }
-  }
-  for (unsigned int i = 0; i < max; i++) {
-    unsigned int n1 = stoi(v1[i]);
-    unsigned int n2 = stoi(v2[i]);
+} // namespace
+
+unsigned int compareVersion(const QString &version1, const QString &version2) {
+  const QStringList v1 = version1.split('.');
+  const QStringList v2 = version2.split('.');
+  const int max = std::max(v1.size(), v2.size());
+
+  for (int i = 0; i < max; i++) {
+    // Missing trailing components count as 0, so "1.50" == "1.50.0".
+    const unsigned int n1 = i < v1.size() ? versionPart(v1[i]) : 0;
+    const unsigned int n2 = i < v2.size() ? versionPart(v2[i]) : 0;
     if (n1 > n2) {
-      // version1 is higher than version2
       return 1;
-    } else if (n1 < n2) {
-      // version2 is higher than version1
+    }
+    if (n1 < n2) {
       return 2;
     }
   }
-  // the same versions
   return 0;
 }
 
+#if !defined(Q_OS_MACOS) && !defined(Q_OS_WIN)
+// $XDG_CONFIG_HOME, falling back to the spec-mandated ~/.config when it is
+// unset or empty. Reading the bare environment variable put the settings file
+// at "/rclone-browser/rclone-browser.ini" -- the filesystem root -- on every
+// system that does not export it, which is most of them.
+static QString XdgConfigHome() {
+  const QString fromEnv = qEnvironmentVariable("XDG_CONFIG_HOME");
+  if (!fromEnv.isEmpty()) {
+    return fromEnv;
+  }
+  return QDir::homePath() + "/.config";
+}
+#endif
+
 static QString GetIniFilename() {
 #ifdef Q_OS_MACOS
-  QFileInfo applicationPath = qApp->applicationFilePath();
+  QFileInfo applicationPath = QFileInfo(qApp->applicationFilePath());
   //  qDebug() << QString(applicationPath.absolutePath());
   // on macOS excecutable file is located in
   // ./rclone-browser.app/Contents/MasOS/ to get actual bundle folder we have to
   // traverse three levels up
-  QFileInfo MacOSPath = applicationPath.dir().path();
-  QFileInfo ContentsPath = MacOSPath.dir().path();
-  QFileInfo appBundlePath = ContentsPath.dir().path();
+  QFileInfo MacOSPath{applicationPath.dir().path()};
+  QFileInfo ContentsPath{MacOSPath.dir().path()};
+  QFileInfo appBundlePath = QFileInfo(ContentsPath.dir().path());
   //  qDebug() << QString("utils.cpp appBundle.absolutePath: " +
   //                      appBundlePath.absolutePath());
   //  qDebug() << QString(
@@ -66,41 +73,30 @@ static QString GetIniFilename() {
   return appBundlePath.dir().filePath(appBundlePath.baseName() + ".ini");
 #else
 #ifdef Q_OS_WIN
-  QFileInfo applicationPath = qApp->applicationFilePath();
+  QFileInfo applicationPath = QFileInfo(qApp->applicationFilePath());
   return applicationPath.dir().filePath(applicationPath.baseName() + ".ini");
 #else
-  QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");
-  return xdg_config_home + "/rclone-browser/rclone-browser.ini";
+  return XdgConfigHome() + "/rclone-browser/rclone-browser.ini";
 #endif
 #endif
 }
 
 bool IsPortableMode() {
-  QString ini = GetIniFilename();
-  QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");
-  //  qDebug() << QString("utils.cpp $XDG_CONFIG_HOME: " + xdg_config_home);
-  QString appimage = qgetenv("APPIMAGE");
-  //  qDebug() << QString("utils.cpp $APPIMAGE: " + appimage);
+  // AppImage portable mode: the runtime points $XDG_CONFIG_HOME at
+  // "<appimage path>.config" when that directory exists next to the AppImage.
+  // Stripping the suffix should therefore give back $APPIMAGE exactly.
+  static const QString kAppImageConfigSuffix = QStringLiteral(".config");
 
-  // cat ".config" from $XDG_CONFIG_HOME
-  // it should be the same as appimage if run from AppImage
-  xdg_config_home = xdg_config_home.left(xdg_config_home.length() - 7);
-  //  qDebug() << QString("utils.cpp $XDG_CONFIG_HOME-7: " + xdg_config_home);
+  const QString xdgConfigHome = qEnvironmentVariable("XDG_CONFIG_HOME");
+  const QString appImage = qEnvironmentVariable("APPIMAGE");
 
-  if (!xdg_config_home.isEmpty() && !appimage.isEmpty() &&
-      xdg_config_home == appimage) {
-
+  if (!appImage.isEmpty() &&
+      xdgConfigHome == appImage + kAppImageConfigSuffix) {
     return true;
   }
 
-  if (QFileInfo(ini).exists()) {
-
-    return true;
-  } else {
-    return false;
-  }
-
-  //  return QFileInfo(ini).exists();
+  // Everywhere else: an .ini file sitting next to the executable.
+  return QFileInfo::exists(GetIniFilename());
 }
 
 std::unique_ptr<QSettings> GetSettings() {
@@ -195,6 +191,25 @@ void WriteSettings(QSettings *settings, QObject *widget) {
   }
 }
 
+// Directory that relative paths are resolved against in portable mode: the
+// folder holding the application. GetRclone() and GetRcloneConf() had identical
+// copies of this platform switch.
+static QDir PortableBaseDir() {
+#ifdef Q_OS_MACOS
+  // The executable lives in ./rclone-browser.app/Contents/MacOS/, so the
+  // bundle's containing folder is three levels up.
+  return QDir(qApp->applicationDirPath() + "/../../..");
+#else
+#ifdef Q_OS_WIN
+  return QDir(qApp->applicationDirPath());
+#else
+  // On Linux portable mode is the AppImage case, where $XDG_CONFIG_HOME is
+  // "<appimage>.config" and its parent is the folder holding the AppImage.
+  return QDir(XdgConfigHome() + "/..");
+#endif
+#endif
+}
+
 QStringList GetRcloneConf() {
   if (gRcloneConf.isEmpty()) {
     return QStringList();
@@ -202,20 +217,7 @@ QStringList GetRcloneConf() {
 
   QString conf = gRcloneConf;
   if (IsPortableMode() && QFileInfo(conf).isRelative()) {
-#ifdef Q_OS_MACOS
-    // on macOS excecutable file is located in
-    // ./rclone-browser.app/Contents/MasOS/rclone-browser to get actual bundle
-    // folder we have to traverse three levels up
-    conf = QDir(qApp->applicationDirPath() + "/../../..").filePath(conf);
-#else
-#ifdef Q_OS_WIN
-    conf = QDir(qApp->applicationDirPath()).filePath(conf);
-#else
-    QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");
-    conf = QDir(xdg_config_home + "/..").filePath(conf);
-#endif
-#endif
-    //    qDebug() << QString("utils.cpp conf: " + conf);
+    conf = PortableBaseDir().filePath(conf);
   }
   return QStringList() << "--config" << conf;
 }
@@ -225,33 +227,28 @@ void SetRcloneConf(const QString &rcloneConf) { gRcloneConf = rcloneConf; }
 QString GetRclone() {
   QString rclone = gRclone;
   if (IsPortableMode() && QFileInfo(rclone).isRelative()) {
-#ifdef Q_OS_MACOS
-    // on macOS excecutable file is located in
-    // ./rclone-browser.app/Contents/MasOS/rclone-browser to get actual bundle
-    // folder we have to traverse three levels up
-    rclone = QDir(qApp->applicationDirPath() + "/../../..").filePath(rclone);
-#else
-#ifdef Q_OS_WIN
-    rclone = QDir(qApp->applicationDirPath()).filePath(rclone);
-#else
-    QString xdg_config_home = qgetenv("XDG_CONFIG_HOME");
-    rclone = QDir(xdg_config_home + "/..").filePath(rclone);
-#endif
-#endif
-    //    qDebug() << QString("utils.cpp rclone portable: " + rclone);
+    rclone = PortableBaseDir().filePath(rclone);
   }
-
   return rclone;
 }
 
 void SetRclone(const QString &rclone) { gRclone = rclone.trimmed(); }
 
 void UseRclonePassword(QProcess *process) {
-  if (!gRclonePassword.isEmpty()) {
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-    env.insert("RCLONE_CONFIG_PASS", gRclonePassword);
-    process->setProcessEnvironment(env);
+  if (gRclonePassword.isEmpty()) {
+    return;
   }
+
+  // Start from whatever the caller already configured rather than always from
+  // systemEnvironment(), so this composes with callers that set their own
+  // variables first instead of silently discarding them.
+  QProcessEnvironment env = process->processEnvironment();
+  if (env.isEmpty()) {
+    env = QProcessEnvironment::systemEnvironment();
+  }
+
+  env.insert("RCLONE_CONFIG_PASS", gRclonePassword);
+  process->setProcessEnvironment(env);
 }
 
 void SetRclonePassword(const QString &rclonePassword) {

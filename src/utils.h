@@ -22,4 +22,7 @@ QStringList GetDriveSharedWithMe();
 QStringList GetDefaultRcloneOptionsList();
 QStringList GetShowHidden();
 
-unsigned int compareVersion(std::string, std::string);
+// Returns 0 if equal, 1 if version1 is newer, 2 if version2 is newer.
+// Non-numeric components (e.g. the "0-beta" in "1.65.0-beta") compare as their
+// leading integer.
+unsigned int compareVersion(const QString &version1, const QString &version2);
