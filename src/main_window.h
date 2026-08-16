@@ -52,9 +52,15 @@ private:
   // Restic: opens a repository in its own tab, prompting for the password
   // first when the repository has no password command configured.
   void openResticRepo(const ResticRepo &repo);
-  void openResticRepoFromRemote(const QString &remote);
+  void addResticRepoFromRemote(const QString &remote);
   void manageResticRepos();
   void showRemotesContextMenu(const QPoint &pos);
+
+  // Appends the saved restic repositories below the rclone remotes, under a
+  // non-selectable heading.
+  void appendResticRepos();
+  // Opens whichever kind of entry is selected in the remotes list.
+  void openSelectedRemote();
 
   void runItem(JobOptionsListWidgetItem *item, bool dryrun = false);
   void editSelectedTask();

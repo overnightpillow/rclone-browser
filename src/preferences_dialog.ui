@@ -472,73 +472,7 @@
          </property>
         </spacer>
        </item>
-       <item>
-        <widget class="QGroupBox" name="groupBox_5">
-         <property name="enabled">
-          <bool>true</bool>
-         </property>
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Fixed">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="title">
-          <string>Remotes icons size</string>
-         </property>
-         <layout class="QHBoxLayout" name="horizontalLayout">
-          <item>
-           <widget class="QCheckBox" name="cb_small">
-            <property name="text">
-             <string>Small</string>
-            </property>
-            <property name="autoExclusive">
-             <bool>true</bool>
-            </property>
-            <property name="tristate">
-             <bool>false</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="cb_medium">
-            <property name="text">
-             <string>Medium</string>
-            </property>
-            <property name="checked">
-             <bool>true</bool>
-            </property>
-            <property name="autoExclusive">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="cb_large">
-            <property name="text">
-             <string>Large</string>
-            </property>
-            <property name="autoExclusive">
-             <bool>true</bool>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <spacer name="horizontalSpacer">
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
-            </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>40</width>
-              <height>20</height>
-             </size>
-            </property>
-           </spacer>
-          </item>
-         </layout>
-        </widget>
-       </item>
+       
        <item>
         <spacer name="verticalSpacer_Interface">
          <property name="orientation">
@@ -747,9 +681,6 @@
   <tabstop>rowColors</tabstop>
   <tabstop>showHidden</tabstop>
   <tabstop>darkMode</tabstop>
-  <tabstop>cb_small</tabstop>
-  <tabstop>cb_medium</tabstop>
-  <tabstop>cb_large</tabstop>
   <tabstop>useSystemSettings</tabstop>
   <tabstop>useProxy</tabstop>
   <tabstop>http_proxy</tabstop>

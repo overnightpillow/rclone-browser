@@ -21,8 +21,6 @@ QString root = isLocal ? "/" : QString();
   auto settings = GetSettings();
   QString rcloneVersion = settings->value("Settings/rcloneVersion").toString();
   settings->setValue("Settings/driveShared", Qt::Unchecked);
-  ui.tree->setAlternatingRowColors(
-      settings->value("Settings/rowColors", false).toBool());
   ui.checkBoxShared->setChecked(false);
   ui.checkBoxShared->setDisabled(!isGoogle);
   // hide checkBoxShared for non Google remotes
@@ -40,28 +38,87 @@ QString root = isLocal ? "/" : QString();
   ui.stream->setIcon(style->standardIcon(QStyle::SP_MediaPlay));
   ui.upload->setIcon(style->standardIcon(QStyle::SP_ArrowUp));
   ui.download->setIcon(style->standardIcon(QStyle::SP_ArrowDown));
-  ui.download->setIcon(style->standardIcon(QStyle::SP_ArrowDown));
   ui.getSize->setIcon(style->standardIcon(QStyle::SP_FileDialogInfoView));
   ui.getTree->setIcon(style->standardIcon(QStyle::SP_FileDialogListView));
   ui.export_->setIcon(style->standardIcon(QStyle::SP_FileDialogDetailedView));
   ui.link->setIcon(style->standardIcon(QStyle::SP_FileLinkIcon));
 
-  ui.buttonRefresh->setDefaultAction(ui.refresh);
-  ui.buttonMkdir->setDefaultAction(ui.mkdir);
-  ui.buttonRename->setDefaultAction(ui.rename);
-  ui.buttonMove->setDefaultAction(ui.move);
-  ui.buttonPurge->setDefaultAction(ui.purge);
-  ui.buttonMount->setDefaultAction(ui.mount);
-  ui.buttonStream->setDefaultAction(ui.stream);
-  ui.buttonUpload->setDefaultAction(ui.upload);
-  ui.buttonDownload->setDefaultAction(ui.download);
-  ui.buttonTree->setDefaultAction(ui.getTree);
-  ui.buttonLink->setDefaultAction(ui.link);
-  ui.buttonSize->setDefaultAction(ui.getSize);
-  ui.buttonExport->setDefaultAction(ui.export_);
+  // The root layout in the .ui file never set margins, so it inherited the
+  // platform default and inset the whole tab by roughly 28px. That made the
+  // tool bar read as a floating rounded bar instead of a full-width one, which
+  // was the actual difference from the restic tab -- not the tool bar itself.
+  if (QLayout *root = layout()) {
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+  }
+
+  // The thirteen actions used to be thirteen QToolButtons in a fixed
+  // QHBoxLayout. That row's minimum width became the widget's minimum width,
+  // so opening a remote forced the main window wider than the user had sized
+  // it. A QToolBar collapses whatever does not fit into an overflow menu, so
+  // the tab imposes no width of its own -- and it matches the restic tab.
+  auto *toolBar = new QToolBar(this);
+  StyleToolBar(toolBar);
+
+  // Every action is also in the tree's right-click menu, so the tool bar does
+  // not have to carry all thirteen. It keeps the ones used while browsing;
+  // Stream, Public Link, Size, Tree and Export stay context-menu only.
+  toolBar->addAction(ui.refresh);
+  toolBar->addSeparator();
+  toolBar->addAction(ui.upload);
+  toolBar->addAction(ui.download);
+  toolBar->addSeparator();
+  toolBar->addAction(ui.mkdir);
+  toolBar->addAction(ui.rename);
+  toolBar->addAction(ui.move);
+  toolBar->addAction(ui.purge);
+  toolBar->addSeparator();
+  toolBar->addAction(ui.mount);
+
+  // "Shared with me" is a child of the old button row, so it has to be
+  // reparented onto the tool bar before that row goes away. addWidget()
+  // reparents it. Deleting the row with the check box still inside it left
+  // every later ui.checkBoxShared->checkState() reading freed memory, which
+  // crashed on the first selection in the tree.
+  QAction *sharedSeparator = toolBar->addSeparator();
+  QAction *sharedAction = toolBar->addWidget(ui.checkBoxShared);
+  // Only Google Drive has "shared with me". Hiding the wrapping action rather
+  // than the check box keeps the tool bar from reserving an empty slot.
+  sharedSeparator->setVisible(isGoogle);
+  sharedAction->setVisible(isGoogle);
+
+  // Swap the tool bar in where the button row sat. The row is only hidden,
+  // never deleted: replaceWidget() already takes it out of the layout, so it
+  // no longer affects sizing, and destroying a .ui-owned widget risks exactly
+  // the dangling-child problem described above.
+  if (auto *buttonsLayout =
+          qobject_cast<QBoxLayout *>(ui.buttons->parentWidget()->layout())) {
+    buttonsLayout->replaceWidget(ui.buttons, toolBar);
+    ui.buttons->hide();
+
+    // Both browser tabs are now the same shape: tool bar on top, tree filling
+    // the middle, one line of de-emphasised context at the bottom. The current
+    // path used to sit directly under the tool bar as a boxed, read-only line
+    // edit, which read as an input field it is not.
+    buttonsLayout->removeWidget(ui.path);
+    buttonsLayout->addWidget(ui.path);
+  }
+
+  ui.path->setFrame(false);
+  ui.path->setContentsMargins(6, 2, 6, 2);
+  ui.path->setText(remote + ":");
+  {
+    QPalette pathPalette = ui.path->palette();
+    const QBrush subdued =
+        palette().brush(QPalette::Disabled, QPalette::WindowText);
+    pathPalette.setBrush(QPalette::Text, subdued);
+    // The line edit paints its own background; match the surrounding tab.
+    pathPalette.setBrush(QPalette::Base, palette().brush(QPalette::Window));
+    ui.path->setPalette(pathPalette);
+  }
 
   ui.tree->sortByColumn(0, Qt::AscendingOrder);
-  ui.tree->header()->setSectionsMovable(false);
+  StyleTreeView(ui.tree);
 
   ItemModel *model = new ItemModel(iconCache, remote, this);
   ui.tree->setModel(model);
@@ -137,8 +194,12 @@ QString root = isLocal ? "/" : QString();
         ui.getSize->setDisabled(!isFolder);
         ui.getTree->setDisabled(!isFolder);
         ui.export_->setDisabled(!isFolder);
-        ui.path->setText(isLocal ? QDir::toNativeSeparators(path.path())
-                                 : path.path());
+        const QString shown =
+            isLocal ? QDir::toNativeSeparators(path.path()) : path.path();
+        // With nothing selected the path is empty, which collapsed the footer
+        // to a blank line and left this tab looking structurally different
+        // from the restic one. Fall back to naming the remote.
+        ui.path->setText(shown.isEmpty() ? remote + ":" : shown);
       });
 
   QObject::connect(ui.refresh, &QAction::triggered, this, [=]() {

@@ -9,27 +9,58 @@ ResticWidget::ResticWidget(const ResticRepo &repo, QWidget *parent)
   layout->setContentsMargins(0, 0, 0, 0);
 
   auto *toolBar = new QToolBar(this);
+  StyleToolBar(toolBar);
+
   mRefresh = toolBar->addAction(
       qApp->style()->standardIcon(QStyle::SP_BrowserReload), "Refresh");
+  mRefresh->setToolTip("Reload the snapshot list from the repository");
+
+  // SP_DialogSaveButton is a floppy disk, which reads as "save a document",
+  // not "pull this out of a backup". A down arrow matches what the action
+  // actually does: bring data down from the repository to local disk.
   mRestore = toolBar->addAction(
-      qApp->style()->standardIcon(QStyle::SP_DialogSaveButton), "Restore...");
+      qApp->style()->standardIcon(QStyle::SP_ArrowDown), "Restore...");
+  mRestore->setToolTip("Restore the selected snapshot or file to a local "
+                       "folder");
+
   layout->addWidget(toolBar);
 
   mTree = new QTreeView(this);
-  mTree->setUniformRowHeights(true);
   mTree->setSelectionMode(QAbstractItemView::SingleSelection);
   mTree->setSelectionBehavior(QAbstractItemView::SelectRows);
   mTree->setContextMenuPolicy(Qt::ActionsContextMenu);
   mTree->addAction(mRestore);
+  StyleTreeView(mTree);
   layout->addWidget(mTree, 1);
 
   mStatus = new QLabel(repo.repository, this);
   mStatus->setTextInteractionFlags(Qt::TextSelectableByMouse);
+  // Secondary information: the repository path and any error text.
+  mStatus->setContentsMargins(6, 2, 6, 2);
+  QPalette statusPalette = mStatus->palette();
+  statusPalette.setBrush(QPalette::WindowText,
+                         palette().brush(QPalette::Disabled,
+                                         QPalette::WindowText));
+  mStatus->setPalette(statusPalette);
   layout->addWidget(mStatus);
 
   mModel = new ResticModel(repo, this);
   mTree->setModel(mModel);
-  mTree->setColumnWidth(0, 420);
+
+  // Column 0 absorbs the spare width, Size and Modified stay at their content
+  // width. A fixed width on column 0 left dead space to the right of the last
+  // header section, since StyleTreeView turns off stretchLastSection.
+  mTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+
+  auto fitColumns = [this]() {
+    mTree->resizeColumnToContents(1);
+    mTree->resizeColumnToContents(2);
+  };
+  QObject::connect(mModel, &QAbstractItemModel::rowsInserted, this, fitColumns);
+  QObject::connect(mModel, &QAbstractItemModel::modelReset, this, fitColumns);
+  QObject::connect(mModel, &QAbstractItemModel::layoutChanged, this,
+                   fitColumns);
+  fitColumns();
 
   QObject::connect(mModel, &ResticModel::failed, this,
                    [=](const QString &message) {

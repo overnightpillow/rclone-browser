@@ -127,8 +127,11 @@ ItemModel::ItemModel(IconCache *icons, const QString &remote, QObject *parent)
   mFileIcon = style->standardIcon(QStyle::SP_FileIcon);
 
   auto settings = GetSettings();
-  mFolderIcons = settings->value("Settings/showFolderIcons", true).toBool();
-  mFileIcons = settings->value("Settings/showFileIcons", true).toBool();
+  // Default off: on a remote listing every distinct extension costs an icon
+  // lookup, and the tree reads more cleanly without them. Both remain
+  // toggleable in Preferences.
+  mFolderIcons = settings->value("Settings/showFolderIcons", false).toBool();
+  mFileIcons = settings->value("Settings/showFileIcons", false).toBool();
 
   mRoot = new Item();
   mRoot->isFolder = true;

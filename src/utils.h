@@ -18,6 +18,15 @@ void SetRcloneConf(const QString &rcloneConf);
 void UseRclonePassword(QProcess *process);
 void SetRclonePassword(const QString &rclonePassword);
 
+// Shared presentation for the tree views. The rclone browser and the restic
+// browser are the same kind of surface and were drifting apart, each setting
+// its own subset of view properties.
+void StyleTreeView(QTreeView *tree);
+
+// Shared presentation for the tab tool bars, so actions read the same way
+// wherever they appear.
+void StyleToolBar(QToolBar *toolBar);
+
 QStringList GetDriveSharedWithMe();
 QStringList GetDefaultRcloneOptionsList();
 QStringList GetShowHidden();

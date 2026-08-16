@@ -32,7 +32,6 @@ public:
   bool getRowColors() const;
   bool getShowHidden() const;
   bool getDarkMode() const;
-  QString getIconSize() const;
 
   bool getUseProxy() const;
   QString getHttpProxy() const;

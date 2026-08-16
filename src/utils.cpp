@@ -255,6 +255,35 @@ void SetRclonePassword(const QString &rclonePassword) {
   gRclonePassword = rclonePassword;
 }
 
+void StyleTreeView(QTreeView *tree) {
+  auto settings = GetSettings();
+
+  tree->setAlternatingRowColors(
+      settings->value("Settings/rowColors", false).toBool());
+
+  // Uniform row heights let the view skip per-row size hints, which matters on
+  // large listings.
+  tree->setUniformRowHeights(true);
+  tree->setAllColumnsShowFocus(true);
+  tree->setExpandsOnDoubleClick(true);
+  tree->setAnimated(true);
+
+  // A frame around a view that already fills its tab is redundant chrome.
+  tree->setFrameShape(QFrame::NoFrame);
+
+  QHeaderView *header = tree->header();
+  header->setSectionsMovable(false);
+  header->setHighlightSections(false);
+  header->setStretchLastSection(false);
+}
+
+void StyleToolBar(QToolBar *toolBar) {
+  toolBar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+  toolBar->setMovable(false);
+  toolBar->setFloatable(false);
+  toolBar->setIconSize(QSize(16, 16));
+}
+
 QStringList GetDriveSharedWithMe() {
   auto settings = GetSettings();
   bool driveShared = settings->value("Settings/driveShared", false).toBool();

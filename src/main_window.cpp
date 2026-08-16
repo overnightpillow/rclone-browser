@@ -180,7 +180,6 @@ MainWindow::MainWindow() {
       settings->setValue("Settings/rowColors", dialog.getRowColors());
       settings->setValue("Settings/showHidden", dialog.getShowHidden());
       settings->setValue("Settings/darkMode", dialog.getDarkMode());
-      settings->setValue("Settings/iconSize", dialog.getIconSize().trimmed());
 
       settings->setValue("Settings/useProxy", dialog.getUseProxy());
       settings->setValue("Settings/http_proxy",
@@ -234,24 +233,8 @@ MainWindow::MainWindow() {
   QObject::connect(ui.refresh, &QPushButton::clicked, this,
                    &MainWindow::rcloneListRemotes);
 
-  QObject::connect(ui.open, &QPushButton::clicked, this, [=]() {
-    auto item = ui.remotes->selectedItems().front();
-    QString type = item->data(Qt::UserRole).toString();
-    QString name = item->text();
-    bool isLocal = type == "local";
-    bool isGoogle = type == "drive";
-
-    auto remote = new RemoteWidget(&mIcons, name, isLocal, isGoogle, ui.tabs);
-    QObject::connect(remote, &RemoteWidget::addMount, this,
-                     &MainWindow::addMount);
-    QObject::connect(remote, &RemoteWidget::addStream, this,
-                     &MainWindow::addStream);
-    QObject::connect(remote, &RemoteWidget::addTransfer, this,
-                     &MainWindow::addTransfer);
-
-    int index = ui.tabs->addTab(remote, name);
-    ui.tabs->setCurrentIndex(index);
-  });
+  QObject::connect(ui.open, &QPushButton::clicked, this,
+                   &MainWindow::openSelectedRemote);
 
   // Restic: right-click a remote to browse a restic repository stored on it,
   // and a menu entry for repositories that are not backed by an rclone remote.
@@ -799,6 +782,89 @@ void MainWindow::rcloneConfig() {
 #endif
 }
 
+// Marks a remotes-list entry as a saved restic repository rather than an
+// rclone remote. The rclone entries put their backend type in Qt::UserRole,
+// so a distinct role keeps the two apart without colliding.
+static const int kResticIndexRole = Qt::UserRole + 1;
+
+// Non-selectable divider separating the rclone remotes from the restic
+// repositories in a single list.
+static QListWidgetItem *makeSectionHeading(const QString &text,
+                                           bool leadingSpace = false) {
+  auto *heading = new QListWidgetItem(text);
+  heading->setFlags(Qt::NoItemFlags);
+
+  QFont font = heading->font();
+  font.setBold(true);
+  // Section labels read as chrome, not content.
+  font.setPointSizeF(font.pointSizeF() * 0.85);
+  font.setCapitalization(QFont::AllUppercase);
+  heading->setFont(font);
+  heading->setForeground(
+      qApp->palette().brush(QPalette::Disabled, QPalette::WindowText));
+
+  // Padding above a heading that follows another section, so the groups read
+  // as separate rather than as one run of rows.
+  QSize hint = heading->sizeHint();
+  const int lineHeight = QFontMetrics(font).height();
+  hint.setHeight(lineHeight + (leadingSpace ? lineHeight * 2 : 4));
+  heading->setSizeHint(hint);
+  heading->setTextAlignment(Qt::AlignLeft | Qt::AlignBottom);
+
+  return heading;
+}
+
+void MainWindow::appendResticRepos() {
+  const QList<ResticRepo> repos = GetResticRepos();
+  if (repos.isEmpty()) {
+    return;
+  }
+
+  // Follows the rclone section, so it gets the extra leading space.
+  ui.remotes->addItem(
+      makeSectionHeading("Restic repositories", ui.remotes->count() > 0));
+
+  for (int i = 0; i < repos.size(); i++) {
+    auto *item = new QListWidgetItem(repos[i].name);
+    item->setData(kResticIndexRole, i);
+    item->setToolTip(repos[i].repository);
+    ui.remotes->addItem(item);
+  }
+}
+
+void MainWindow::openSelectedRemote() {
+  const auto selected = ui.remotes->selectedItems();
+  if (selected.isEmpty()) {
+    return;
+  }
+  QListWidgetItem *item = selected.front();
+
+  const QVariant resticIndex = item->data(kResticIndexRole);
+  if (resticIndex.isValid()) {
+    const QList<ResticRepo> repos = GetResticRepos();
+    const int index = resticIndex.toInt();
+    if (index >= 0 && index < repos.size()) {
+      openResticRepo(repos[index]);
+    }
+    return;
+  }
+
+  const QString type = item->data(Qt::UserRole).toString();
+  const QString name = item->text();
+
+  auto remote = new RemoteWidget(&mIcons, name, type == "local",
+                                 type == "drive", ui.tabs);
+  QObject::connect(remote, &RemoteWidget::addMount, this,
+                   &MainWindow::addMount);
+  QObject::connect(remote, &RemoteWidget::addStream, this,
+                   &MainWindow::addStream);
+  QObject::connect(remote, &RemoteWidget::addTransfer, this,
+                   &MainWindow::addTransfer);
+
+  const int index = ui.tabs->addTab(remote, name);
+  ui.tabs->setCurrentIndex(index);
+}
+
 void MainWindow::openResticRepo(const ResticRepo &repo) {
   if (!EnsureResticPassword(repo, this)) {
     return;
@@ -809,44 +875,111 @@ void MainWindow::openResticRepo(const ResticRepo &repo) {
   ui.tabs->setCurrentIndex(index);
 }
 
-void MainWindow::openResticRepoFromRemote(const QString &remote) {
+void MainWindow::addResticRepoFromRemote(const QString &remote) {
   bool ok = false;
   const QString path = QInputDialog::getText(
-      this, "Open restic repository",
-      QString("Path of the restic repository within %1:").arg(remote),
+      this, "Add restic repository",
+      QString("Path of the restic repository within %1:\n\n"
+              "Leave empty if the repository is at the root of the remote.")
+          .arg(remote),
       QLineEdit::Normal, QString(), &ok);
   if (!ok) {
     return;
   }
 
-  ResticRepo repo;
-  repo.repository = ResticRepoForRemote(remote, path);
-  repo.name = remote + ":" + path;
+  ResticRepo prefilled;
+  prefilled.repository = ResticRepoForRemote(remote, path);
+  prefilled.name = path.isEmpty() ? remote : remote + "/" + path;
 
-  // Reuse a stored entry for the same repository so a configured password
-  // command applies instead of prompting.
-  for (const ResticRepo &known : GetResticRepos()) {
-    if (known.repository == repo.repository) {
-      repo = known;
+  // Hand it to the normal dialog so the name and an optional password command
+  // can be set in the same pass, rather than inventing a second entry path.
+  ResticRepoDialog dialog(this, prefilled);
+  if (dialog.exec() != QDialog::Accepted) {
+    return;
+  }
+
+  QList<ResticRepo> repos = GetResticRepos();
+
+  // Adding the same repository twice would produce two list entries that only
+  // differ by name, so update the existing one instead.
+  const ResticRepo added = dialog.repo();
+  bool replaced = false;
+  for (ResticRepo &existing : repos) {
+    if (existing.repository == added.repository) {
+      existing = added;
+      replaced = true;
       break;
     }
   }
+  if (!replaced) {
+    repos.append(added);
+  }
 
-  openResticRepo(repo);
+  SetResticRepos(repos);
+  rcloneListRemotes();
+  openResticRepo(added);
 }
 
 void MainWindow::showRemotesContextMenu(const QPoint &pos) {
   QListWidgetItem *item = ui.remotes->itemAt(pos);
-  if (!item) {
+  if (!item || item->flags() == Qt::NoItemFlags) {
     return;
   }
 
-  const QString name = item->text();
+  // A right-click does not move the selection on its own, and the actions
+  // below read the selected entry.
+  ui.remotes->setCurrentItem(item);
 
   QMenu menu(this);
-  QAction *openRestic = menu.addAction("Open as restic repository...");
-  if (menu.exec(ui.remotes->mapToGlobal(pos)) == openRestic) {
-    openResticRepoFromRemote(name);
+
+  const QVariant resticIndex = item->data(kResticIndexRole);
+  if (resticIndex.isValid()) {
+    QList<ResticRepo> repos = GetResticRepos();
+    const int index = resticIndex.toInt();
+    if (index < 0 || index >= repos.size()) {
+      return;
+    }
+
+    QAction *open = menu.addAction("Open");
+    QAction *edit = menu.addAction("Edit...");
+    menu.addSeparator();
+    QAction *remove = menu.addAction("Remove from list");
+
+    QAction *chosen = menu.exec(ui.remotes->mapToGlobal(pos));
+    if (chosen == open) {
+      openResticRepo(repos[index]);
+    } else if (chosen == edit) {
+      ResticRepoDialog dialog(this, repos[index]);
+      if (dialog.exec() == QDialog::Accepted) {
+        ForgetResticPassword(repos[index]);
+        repos[index] = dialog.repo();
+        SetResticRepos(repos);
+        rcloneListRemotes();
+      }
+    } else if (chosen == remove) {
+      if (QMessageBox::question(
+              this, "Remove",
+              QString("Remove '%1' from the list?\n\nThe repository itself is "
+                      "not touched.")
+                  .arg(repos[index].name)) == QMessageBox::Yes) {
+        ForgetResticPassword(repos[index]);
+        repos.removeAt(index);
+        SetResticRepos(repos);
+        rcloneListRemotes();
+      }
+    }
+    return;
+  }
+
+  QAction *open = menu.addAction("Open");
+  menu.addSeparator();
+  QAction *addRestic = menu.addAction("Add as restic repository...");
+
+  QAction *chosen = menu.exec(ui.remotes->mapToGlobal(pos));
+  if (chosen == open) {
+    openSelectedRemote();
+  } else if (chosen == addRestic) {
+    addResticRepoFromRemote(item->text());
   }
 }
 
@@ -941,6 +1074,11 @@ void MainWindow::manageResticRepos() {
   layout->addWidget(buttons);
 
   const int row = dialog.exec() == QDialog::Accepted ? list->currentRow() : -1;
+
+  // The remotes panel lists these repositories, so it has to follow any adds,
+  // edits or removals made here.
+  rcloneListRemotes();
+
   if (row >= 0 && row < repos.size()) {
     openResticRepo(repos[row]);
   }
@@ -956,114 +1094,40 @@ void MainWindow::rcloneListRemotes() {
       &QProcess::finished,
       this, [=](int code, QProcess::ExitStatus) {
         if (code == 0) {
-          QStyle *style = qApp->style();
+          const QString bytes = p->readAllStandardOutput().trimmed();
+          const QStringList items = bytes.split('\n');
 
-          QString bytes = p->readAllStandardOutput().trimmed();
-          QStringList items = bytes.split('\n');
-
-          auto settings = GetSettings();
-          bool darkModeIni = settings->value("Settings/darkModeIni").toBool();
-          QString iconSize = settings->value("Settings/iconSize").toString();
+          // The remotes list is a plain text list. It used to render a custom
+          // 320x320 logo per backend type, with a block of per-platform,
+          // per-theme scaling maths to size them -- two visual languages in one
+          // window, since every other icon in the app comes from QStyle.
+          bool addedHeading = false;
 
           for (const QString &line : items) {
             if (line.isEmpty()) {
               continue;
             }
 
-            QStringList parts = line.split(':');
+            const QStringList parts = line.split(':');
             if (parts.count() != 2) {
               continue;
             }
 
-            QString name = parts[0].trimmed();
-            QString type = parts[1].trimmed();
-            QString tooltip = type;
+            const QString name = parts[0].trimmed();
+            const QString type = parts[1].trimmed();
 
-            QString img_add = "";
-            int size;
-
-            // medium scale by default
-            double darkModeIconScale = 1.333;
-            double lightModeiconScale = 2;
-            // to avoid "variable not used" compiler error
-            if (darkModeIconScale == lightModeiconScale) {
-            };
-
-            // set icons scale based on iconSize value
-            if (iconSize == "small") {
-              lightModeiconScale = 1.5;
-              darkModeIconScale = 1;
+            if (!addedHeading) {
+              ui.remotes->addItem(makeSectionHeading("rclone remotes"));
+              addedHeading = true;
             }
 
-            if (iconSize == "medium") {
-              lightModeiconScale = 2;
-              darkModeIconScale = 1.333;
-            }
-
-            if (iconSize == "large") {
-              lightModeiconScale = 3;
-              darkModeIconScale = 2;
-            }
-
-#if !defined(Q_OS_MACOS)
-            // _inv only for dark mode
-            // we use darkModeIni to apply mode active at startup
-            if (darkModeIni) {
-              img_add = "_inv";
-
-            } else {
-              img_add = "";
-            }
-#if defined(Q_OS_WIN)
-            // on Windows dark theme changes PM_ListViewIconSize size
-            // so we have to adjust
-            if (darkModeIni) {
-              size = darkModeIconScale *
-                     style->pixelMetric(QStyle::PM_ListViewIconSize);
-            } else {
-              size = lightModeiconScale *
-                     style->pixelMetric(QStyle::PM_ListViewIconSize);
-            }
-#else
-             // for Linux/BSD PM_ListViewIconSize stays the same
-             size = lightModeiconScale * style->pixelMetric(QStyle::PM_ListViewIconSize);
-#endif
-#else
-             QString sysInfo = QSysInfo::productVersion();
-             // dark mode on older macOS
-             if (sysInfo == "10.9" ||
-                 sysInfo == "10.10" ||
-                 sysInfo == "10.11" ||
-                 sysInfo == "10.12" ||
-                 sysInfo == "10.13") {
-
-               // on older macOS we also have to adjust icon size per mode
-               if (darkModeIni) {
-                 size = darkModeIconScale * style->pixelMetric(QStyle::PM_ListViewIconSize);
-                 img_add = "_inv";
-               } else {
-                 size = lightModeiconScale * style->pixelMetric(QStyle::PM_ListViewIconSize);
-                 img_add = "";
-               }
-
-             } else {
-               // for macOS > 10.13 native dark mode does not change IconSize base
-               size = 1.5 * lightModeiconScale * style->pixelMetric(QStyle::PM_ListViewIconSize);
-             }
-#endif
-            ui.remotes->setIconSize(QSize(size, size));
-
-            QString path =
-                ":/remotes/images/" + type.replace(' ', '_') + img_add + ".png";
-            QIcon icon(QFile(path).exists()
-                           ? path
-                           : ":/remotes/images/unknown" + img_add + ".png");
-
-            QListWidgetItem *item = new QListWidgetItem(icon, name);
+            auto *item = new QListWidgetItem(name);
             item->setData(Qt::UserRole, type);
-            item->setToolTip(tooltip);
+            item->setToolTip(type);
             ui.remotes->addItem(item);
           }
+
+          appendResticRepos();
         } else {
           if (p->error() != QProcess::FailedToStart) {
             if (getConfigPassword(p)) {
