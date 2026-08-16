@@ -1,5 +1,6 @@
 #pragma once
 
+#include "parsing.h"
 #include "pch.h"
 #include "restic.h"
 
@@ -36,6 +37,17 @@ struct ResticItem {
   bool loaded = false;
   bool loading = false;
 };
+
+// Rebuilds a directory tree from the flat, absolute-path node stream that
+// "restic ls" produces, under a detached root the caller owns. Intermediate
+// directories are created on demand, so the stream's order does not matter.
+//
+// Exposed for testing: this is the most intricate part of the restic browser
+// and the part least likely to be exercised by clicking around.
+ResticItem *BuildResticTree(const QVector<ResticNode> &nodes);
+
+// Folders first, then case-insensitive by name, applied recursively.
+void SortResticTree(ResticItem *item);
 
 class ResticModel : public QAbstractItemModel {
   Q_OBJECT

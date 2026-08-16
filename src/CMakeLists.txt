@@ -34,6 +34,8 @@ set(HEADERS
   utils.h
   job_options.h
   restic.h
+  formatting.h
+  parsing.h
 )
 
 set(SOURCES
@@ -52,6 +54,8 @@ set(SOURCES
   utils.cpp
   job_options.cpp
   list_of_job_options.cpp
+  formatting.cpp
+  parsing.cpp
   restic.cpp
   restic_model.cpp
   restic_widget.cpp
@@ -64,6 +68,15 @@ elseif(APPLE)
   list(APPEND HEADERS osx_helper.h)
   list(APPEND SOURCES osx_helper.mm)
 endif()
+
+# Everything except main(), exported so the tests link the same translation
+# units the application ships rather than a re-listed subset that can drift.
+set(RRM_SOURCES ${SOURCES})
+list(REMOVE_ITEM RRM_SOURCES main.cpp)
+set(RRM_SOURCES ${RRM_SOURCES} PARENT_SCOPE)
+set(RRM_HEADERS ${HEADERS} PARENT_SCOPE)
+set(RRM_UI ${UI} PARENT_SCOPE)
+set(RRM_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR} PARENT_SCOPE)
 
 qt_add_executable(rclone-browser
   WIN32 MACOSX_BUNDLE

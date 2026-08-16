@@ -1,5 +1,7 @@
 #include "item_model.h"
+#include "formatting.h"
 #include "icon_cache.h"
+#include "parsing.h"
 #include "utils.h"
 #include <algorithm>
 
@@ -13,56 +15,6 @@ static void advanceSpinner(QString &text) {
   size_t idx = found - spinner;
   size_t next = idx == spinnerCount - 1 ? 0 : idx + 1;
   text[spinnerPos] = spinner[next];
-}
-
-QString getNiceSize(quint64 size) {
-  static const char prefix[] = " KMGTPE";
-  for (int i = sizeof(prefix) - 2; i >= 1; i--) {
-    quint64 base = quint64(1) << (i * 10);
-    if (size >= 10 * base) {
-      return QString("%1 %2").arg(size / base).arg(QChar(prefix[i]));
-    }
-  }
-  // Below 10 KiB, report the exact byte count. The loop used to run down to
-  // i == 0 with the same ">= 10 * base" test, so every size under 10 bytes fell
-  // through and rendered as the literal string "0".
-  return QString::number(size);
-}
-// lsjson reports RFC3339 timestamps ("2026-08-16T00:14:33.617734546-07:00").
-// The tree sorts the Modified column as a string, so the rendered form has to
-// stay fixed-width and lexicographically ordered: local time as
-// "yyyy-MM-dd HH:mm:ss".
-QString formatModTime(const QString &rfc3339) {
-  if (rfc3339.isEmpty()) {
-    return QString();
-  }
-
-  // Qt parses at most millisecond precision; rclone emits nanoseconds.
-  QString trimmed = rfc3339;
-  static const QRegularExpression subSecond(R"(\.(\d{3})\d*)");
-  trimmed.replace(subSecond, ".\\1");
-
-  const QDateTime parsed = QDateTime::fromString(trimmed, Qt::ISODateWithMs);
-  if (!parsed.isValid()) {
-    return rfc3339;
-  }
-
-  // Backends without directory metadata -- B2 and S3 among them, where
-  // directories are synthetic -- report a sentinel instead of a real time.
-  // rclone uses 2000-01-01T00:00:00Z; some backends use the Unix epoch.
-  // Showing it is worse than showing nothing: rendered in a timezone behind
-  // UTC the sentinel reads as "1999-12-31", which looks like a decoding bug.
-  //
-  // Anything at or before the sentinel is treated as unknown. A genuine file
-  // older than 2000 would be blanked too, but that is both vanishingly rare in
-  // cloud storage and a harmless failure next to displaying a wrong date.
-  static const QDateTime unknownBefore(QDate(2000, 1, 1), QTime(0, 0),
-                                       QTimeZone::UTC);
-  if (parsed.toUTC() <= unknownBefore) {
-    return QString();
-  }
-
-  return parsed.toLocalTime().toString("yyyy-MM-dd HH:mm:ss");
 }
 
 } // namespace
@@ -308,7 +260,7 @@ QVariant ItemModel::data(const QModelIndex &index, int role) const {
       if (item->isFolder || item->state == Item::Special) {
         return QString();
       } else {
-        return getNiceSize(item->size);
+        return FormatSize(item->size);
       }
     case 2:
       return item->modified;
@@ -449,30 +401,20 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
       }
     } else {
       // lsjson emits one JSON array covering both directories and files, so a
-      // whole listing arrives from a single process and is parsed here instead
-      // of being scraped line by line from two.
-      QJsonParseError parseError;
-      const QJsonDocument doc =
-          QJsonDocument::fromJson(ls->readAllStandardOutput(), &parseError);
-
-      if (parseError.error != QJsonParseError::NoError || !doc.isArray()) {
+      // whole listing arrives from a single process. The parse itself lives in
+      // parsing.cpp so it can be tested without spawning rclone.
+      QVector<RcloneEntry> entries;
+      if (!ParseRcloneListing(ls->readAllStandardOutput(), &entries,
+                              &errorText)) {
         failed = true;
-        errorText = "could not parse rclone lsjson output: " +
-                    parseError.errorString();
       } else {
-        for (const QJsonValue &value : doc.array()) {
-          const QJsonObject entry = value.toObject();
-
+        for (const RcloneEntry &entry : entries) {
           Item *child = new Item();
           child->parent = parent;
-          child->isFolder = entry.value("IsDir").toBool();
-          child->name = entry.value("Name").toString();
-          child->modified = formatModTime(entry.value("ModTime").toString());
-          if (!child->isFolder) {
-            // Directories report -1 (or a meaningless local inode size).
-            const qint64 size = entry.value("Size").toVariant().toLongLong();
-            child->size = size > 0 ? quint64(size) : 0;
-          }
+          child->isFolder = entry.isFolder;
+          child->name = entry.name;
+          child->modified = entry.modified;
+          child->size = entry.size;
 
           cache->append(child);
         }

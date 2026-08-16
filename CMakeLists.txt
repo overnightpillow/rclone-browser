@@ -40,3 +40,9 @@ endif()
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/build")
 
 add_subdirectory(src)
+
+option(RRM_BUILD_TESTS "Build the test suite" ON)
+if(RRM_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
+endif()

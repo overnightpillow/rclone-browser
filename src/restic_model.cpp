@@ -1,40 +1,10 @@
 #include "restic_model.h"
+#include "formatting.h"
 #include "utils.h"
 
-namespace {
-
-QString niceSize(quint64 size) {
-  static const char prefix[] = " KMGTPE";
-  for (int i = sizeof(prefix) - 2; i >= 1; i--) {
-    const quint64 base = quint64(1) << (i * 10);
-    if (size >= 10 * base) {
-      return QString("%1 %2").arg(size / base).arg(QChar(prefix[i]));
-    }
-  }
-  return QString::number(size);
-}
-
-// restic emits RFC3339 with nanosecond precision; Qt parses at most
-// milliseconds. Rendered fixed-width so string sorting stays chronological.
-QString formatTime(const QString &rfc3339) {
-  if (rfc3339.isEmpty()) {
-    return QString();
-  }
-
-  QString trimmed = rfc3339;
-  static const QRegularExpression subSecond(R"(\.(\d{3})\d*)");
-  trimmed.replace(subSecond, ".\\1");
-
-  const QDateTime parsed = QDateTime::fromString(trimmed, Qt::ISODateWithMs);
-  if (!parsed.isValid()) {
-    return rfc3339;
-  }
-  return parsed.toLocalTime().toString("yyyy-MM-dd HH:mm:ss");
-}
-
-// Folders first, then case-insensitive natural order -- restic emits nodes in
-// tree order, which interleaves them.
-void sortTree(ResticItem *item) {
+// Folders first, then case-insensitive by name -- restic emits nodes in tree
+// order, which interleaves them.
+void SortResticTree(ResticItem *item) {
   std::sort(item->children.begin(), item->children.end(),
             [](const ResticItem *a, const ResticItem *b) {
               if (a->isFolder != b->isFolder) {
@@ -44,11 +14,57 @@ void sortTree(ResticItem *item) {
             });
 
   for (ResticItem *child : item->children) {
-    sortTree(child);
+    SortResticTree(child);
   }
 }
 
-} // namespace
+ResticItem *BuildResticTree(const QVector<ResticNode> &nodes) {
+  auto *root = new ResticItem();
+
+  QHash<QString, ResticItem *> byPath;
+  byPath.insert("/", root);
+
+  // Resolves, creating if needed, the folder holding a path. Recursive so a
+  // node can arrive before the directory that contains it.
+  std::function<ResticItem *(const QString &)> folderFor =
+      [&](const QString &dirPath) -> ResticItem * {
+    if (dirPath.isEmpty() || dirPath == "/") {
+      return root;
+    }
+    auto it = byPath.find(dirPath);
+    if (it != byPath.end()) {
+      return it.value();
+    }
+
+    ResticItem *parent = folderFor(dirPath.section('/', 0, -2));
+    auto *item = new ResticItem();
+    item->parent = parent;
+    item->isFolder = true;
+    item->name = dirPath.section('/', -1);
+    item->path = dirPath;
+    parent->children.append(item);
+    byPath.insert(dirPath, item);
+    return item;
+  };
+
+  for (const ResticNode &node : nodes) {
+    if (node.isDir) {
+      folderFor(node.path)->modified = node.modified;
+    } else {
+      ResticItem *parent = folderFor(node.path.section('/', 0, -2));
+      auto *item = new ResticItem();
+      item->parent = parent;
+      item->name = node.name;
+      item->path = node.path;
+      item->size = node.size;
+      item->modified = node.modified;
+      parent->children.append(item);
+    }
+  }
+
+  SortResticTree(root);
+  return root;
+}
 
 ResticModel::ResticModel(const ResticRepo &repo, QObject *parent)
     : QAbstractItemModel(parent), mRepo(repo) {
@@ -185,7 +201,7 @@ QVariant ResticModel::data(const QModelIndex &index, int role) const {
       if (item->isPlaceholder || item->isFolder || item->isSnapshot) {
         return QString();
       }
-      return niceSize(item->size);
+      return FormatSize(item->size);
     case 2:
       return item->modified;
     }
@@ -270,45 +286,33 @@ void ResticModel::loadSnapshots() {
           return;
         }
 
-        QJsonParseError parseError;
-        const QJsonDocument doc =
-            QJsonDocument::fromJson(process->readAllStandardOutput(), &parseError);
-        if (parseError.error != QJsonParseError::NoError || !doc.isArray()) {
-          const QString error =
-              "could not parse restic snapshots output: " + parseError.errorString();
-          setPlaceholder(rootIndex, mRoot, "... error: " + error);
-          emit failed(error);
+        QVector<ResticSnapshot> parsed;
+        QString parseErrorText;
+        if (!ParseResticSnapshots(process->readAllStandardOutput(), &parsed,
+                                  &parseErrorText)) {
+          setPlaceholder(rootIndex, mRoot, "... error: " + parseErrorText);
+          emit failed(parseErrorText);
           return;
         }
 
         clearChildren(rootIndex, mRoot);
 
         QVector<ResticItem *> snapshots;
-        for (const QJsonValue &value : doc.array()) {
-          const QJsonObject entry = value.toObject();
-
+        snapshots.reserve(parsed.size());
+        for (const ResticSnapshot &entry : parsed) {
           auto *item = new ResticItem();
           item->parent = mRoot;
           item->isSnapshot = true;
           item->isFolder = true;
-          item->snapshotId = entry.value("id").toString();
-          item->modified = formatTime(entry.value("time").toString());
-
-          for (const QJsonValue &p : entry.value("paths").toArray()) {
-            item->snapshotPaths << p.toString();
-          }
-
-          const QString shortId = entry.value("short_id").toString();
-          const QString host = entry.value("hostname").toString();
+          item->snapshotId = entry.id;
+          item->modified = entry.time;
+          item->snapshotPaths = entry.paths;
           item->name = QString("%1  %2  %3")
-                           .arg(shortId, item->modified, host)
+                           .arg(entry.shortId, entry.time, entry.hostname)
                            .trimmed();
 
           snapshots.append(item);
         }
-
-        // Newest first: restic returns oldest first.
-        std::reverse(snapshots.begin(), snapshots.end());
 
         if (snapshots.isEmpty()) {
           setPlaceholder(rootIndex, mRoot, "... no snapshots in this repository");
@@ -356,83 +360,24 @@ void ResticModel::loadSnapshotTree(const QPersistentModelIndex &parentIndex,
         }
 
         // "restic ls --json" is JSON Lines, not a JSON array: one snapshot
-        // object followed by one object per node.
+        // object followed by one object per node. Parsing and tree assembly
+        // both live outside this lambda so they can be tested directly.
         //
-        // The subtree is assembled under a detached root first, then spliced
-        // in with proper insert signals. Building straight into the live
-        // snapshot node would either bypass the model signals or force a full
-        // model reset, which collapses every other expanded row in the view.
-        auto *staging = new ResticItem();
-        QHash<QString, ResticItem *> byPath;
-        byPath.insert("/", staging);
-
-        // Resolves (creating if needed) the folder holding a given path, so
-        // the flat node stream can be rebuilt into a tree regardless of order.
-        std::function<ResticItem *(const QString &)> folderFor =
-            [&](const QString &dirPath) -> ResticItem * {
-          if (dirPath.isEmpty() || dirPath == "/") {
-            return staging;
-          }
-          auto it = byPath.find(dirPath);
-          if (it != byPath.end()) {
-            return it.value();
-          }
-
-          ResticItem *parent =
-              folderFor(dirPath.section('/', 0, -2));
-          auto *item = new ResticItem();
-          item->parent = parent;
-          item->isFolder = true;
-          item->name = dirPath.section('/', -1);
-          item->path = dirPath;
-          parent->children.append(item);
-          byPath.insert(dirPath, item);
-          return item;
-        };
-
-        int nodeCount = 0;
-        const QByteArray output = process->readAllStandardOutput();
-        for (const QByteArray &line : output.split('\n')) {
-          if (line.trimmed().isEmpty()) {
-            continue;
-          }
-
-          const QJsonObject entry = QJsonDocument::fromJson(line).object();
-          if (entry.value("struct_type").toString() != "node") {
-            continue;
-          }
-
-          const QString path = entry.value("path").toString();
-          const QString type = entry.value("type").toString();
-          if (path.isEmpty()) {
-            continue;
-          }
-
-          if (type == "dir") {
-            ResticItem *item = folderFor(path);
-            item->modified = formatTime(entry.value("mtime").toString());
-          } else {
-            ResticItem *parent = folderFor(path.section('/', 0, -2));
-            auto *item = new ResticItem();
-            item->parent = parent;
-            item->name = entry.value("name").toString();
-            item->path = path;
-            item->size = quint64(entry.value("size").toVariant().toLongLong());
-            item->modified = formatTime(entry.value("mtime").toString());
-            parent->children.append(item);
-          }
-          nodeCount++;
-        }
+        // The subtree is assembled under a detached root, then spliced in with
+        // proper insert signals. Building straight into the live snapshot node
+        // would either bypass the model signals or force a full model reset,
+        // which collapses every other expanded row in the view.
+        QVector<ResticNode> nodes;
+        ParseResticNodes(process->readAllStandardOutput(), &nodes, nullptr);
 
         snapshot->loaded = true;
 
-        if (nodeCount == 0) {
-          delete staging;
+        if (nodes.isEmpty()) {
           setPlaceholder(parentIndex, snapshot, "... snapshot is empty");
           return;
         }
 
-        sortTree(staging);
+        ResticItem *staging = BuildResticTree(nodes);
 
         // Drop the "loading" placeholder, then splice the staged subtree in.
         clearChildren(parentIndex, snapshot);
