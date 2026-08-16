@@ -287,6 +287,14 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       };
     };
   }
+
+  // Opened from the Tasks tab with no remote context, the prefill above would
+  // leave ":" or ":." in the fields. Start blank instead.
+  if (remote.isEmpty() && !editMode) {
+    ui.textSource->clear();
+    ui.textDest->clear();
+    ui.textDescription->setFocus(Qt::OtherFocusReason);
+  }
 }
 
 TransferDialog::~TransferDialog() {
