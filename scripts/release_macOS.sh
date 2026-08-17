@@ -6,7 +6,7 @@
 # prefix (/usr/local/opt/qt), called nproc, passed -qmldir for QML this app
 # does not have, and depended on a global npm appdmg plus p7zip.
 #
-# Usage:  scripts/release_macOS.sh [--zip]
+# Usage:  scripts/release_macOS.sh [--zip|--dmg]
 
 set -euo pipefail
 
@@ -57,14 +57,75 @@ if ! otool -l "$APP/Contents/MacOS/$APP_NAME" | grep -q "@executable_path/../Fra
   install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP/Contents/MacOS/$APP_NAME"
 fi
 
+# macdeployqt copies the libraries in but leaves each one's own install name
+# (LC_ID_DYLIB) pointing at where it came from -- libbrotlicommon still called
+# itself /opt/homebrew/opt/brotli/lib/libbrotlicommon.1.dylib inside the
+# bundle. Nothing referenced it by that name, so it loaded anyway, but it is a
+# Homebrew path shipped to machines that have no Homebrew, and anything that
+# later links against it by its own name would look there.
+echo "==> Fixing install names"
+while read -r MACHO; do
+  file "$MACHO" | grep -q Mach-O || continue
+
+  CURRENT_ID="$(otool -D "$MACHO" 2>/dev/null | sed -n '2p')"
+  [ -n "$CURRENT_ID" ] || continue
+  case "$CURRENT_ID" in
+    @rpath/*|@executable_path/*|@loader_path/*) continue ;;
+  esac
+
+  # Frameworks keep their Name.framework/Versions/A/Name shape; a plain
+  # library is just its file name.
+  case "$MACHO" in
+    *.framework/Versions/*)
+      NAME="$(basename "$MACHO")"
+      NEW_ID="@rpath/$NAME.framework/Versions/A/$NAME"
+      ;;
+    *)
+      NEW_ID="@rpath/$(basename "$MACHO")"
+      ;;
+  esac
+
+  install_name_tool -id "$NEW_ID" "$MACHO"
+done < <(find "$APP/Contents/Frameworks" "$APP/Contents/PlugIns" -type f 2>/dev/null)
+
 # Every install_name_tool edit invalidates the signature, so sign last.
 echo "==> Signing (ad-hoc)"
 codesign --force --deep --sign - "$APP"
 codesign --verify --deep --strict "$APP"
 
+# The whole bundle, not just the main executable: the leak found by checking
+# only that one was in a library three levels down from it.
 echo "==> Verifying the bundle is self-contained"
-if otool -L "$APP/Contents/MacOS/$APP_NAME" | grep -q "$QT_PREFIX"; then
-  echo "error: bundle still links against $QT_PREFIX" >&2
+LEAKED=0
+OUTSIDE='/opt/homebrew\|/usr/local/opt\|/usr/local/Cellar'
+while read -r MACHO; do
+  file "$MACHO" | grep -q Mach-O || continue
+
+  # otool -L prints the file name, then -- for a library -- its own install
+  # name, then the dependencies. Mistaking that install name for a dependency
+  # reports every library as leaking, so it is dropped explicitly rather than
+  # by counting lines: an executable has no install name line to drop.
+  ID="$(otool -D "$MACHO" 2>/dev/null | sed -n '2p')"
+  DEPS="$(otool -L "$MACHO" | tail -n +2 | sed 's/ (compatibility.*//; s/^[[:space:]]*//')"
+  if [ -n "$ID" ]; then
+    DEPS="$(printf '%s\n' "$DEPS" | grep -vxF "$ID" || true)"
+  fi
+
+  if printf '%s\n' "$DEPS" | grep -q "$OUTSIDE"; then
+    echo "error: $MACHO depends on a library outside the bundle:" >&2
+    printf '%s\n' "$DEPS" | grep "$OUTSIDE" >&2
+    LEAKED=1
+  fi
+
+  case "$ID" in
+    /opt/homebrew/*|/usr/local/opt/*|/usr/local/Cellar/*)
+      echo "error: $MACHO calls itself $ID" >&2
+      LEAKED=1
+      ;;
+  esac
+done < <(find "$APP" -type f)
+
+if [ "$LEAKED" -ne 0 ]; then
   exit 1
 fi
 
@@ -76,6 +137,59 @@ if [ "${1:-}" = "--zip" ]; then
   echo "==> Zipping"
   # ditto preserves the signature and resource forks; plain zip does not.
   ( cd "$RELEASE" && ditto -c -k --keepParent "$APP_NAME.app" "$APP_NAME-$VERSION-macos.zip" )
+fi
+
+if [ "${1:-}" = "--dmg" ]; then
+  DMG="$RELEASE/$APP_NAME-$VERSION-macos.dmg"
+  echo "==> Building $(basename "$DMG")"
+
+  # A disk image is what a Mac user expects to download: it mounts to a window
+  # holding the application and a shortcut to /Applications, and dragging
+  # between the two is the install. A zip leaves the bundle wherever the
+  # browser happened to put it, which is usually Downloads, where it keeps
+  # running from until it is noticed.
+  STAGE="$(mktemp -d)"
+  trap 'rm -rf "$STAGE"' EXIT
+
+  cp -R "$RELEASE/$APP_NAME.app" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
+
+  rm -f "$DMG"
+  # UDZO is the compressed read-only format; anything else is bigger for no
+  # benefit on a download.
+  hdiutil create \
+    -volname "$APP_NAME $VERSION" \
+    -srcfolder "$STAGE" \
+    -ov \
+    -format UDZO \
+    "$DMG" >/dev/null
+
+  rm -rf "$STAGE"
+  trap - EXIT
+
+  echo "==> Verifying the image"
+  hdiutil verify "$DMG" >/dev/null
+
+  # Mount it and check the bundle inside is the signed one, rather than
+  # trusting that the copy above did what it looked like it did.
+  MOUNT="$(mktemp -d)"
+  hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$MOUNT" >/dev/null
+  if ! codesign --verify --deep --strict "$MOUNT/$APP_NAME.app"; then
+    hdiutil detach "$MOUNT" >/dev/null
+    rmdir "$MOUNT"
+    echo "error: the application inside the image is not correctly signed" >&2
+    exit 1
+  fi
+  if [ ! -L "$MOUNT/Applications" ]; then
+    hdiutil detach "$MOUNT" >/dev/null
+    rmdir "$MOUNT"
+    echo "error: the image has no /Applications shortcut to drag onto" >&2
+    exit 1
+  fi
+  hdiutil detach "$MOUNT" >/dev/null
+  rmdir "$MOUNT"
+
+  echo "Done: $DMG  ($(du -sh "$DMG" | cut -f1))"
 fi
 
 echo

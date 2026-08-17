@@ -17,6 +17,59 @@ port and the restic support, not a rename.
 The original README is preserved as [README.upstream.md](README.upstream.md)
 and still describes most of the rclone functionality accurately.
 
+## Download
+
+Builds for each release are on the
+[releases page](https://github.com/overnightpillow/rclone-browser/releases).
+
+| Platform | File | Install |
+|---|---|---|
+| macOS 12+, Apple silicon or Intel | `rclone-browser-<version>-macos.dmg` | Open it, drag the app to Applications |
+| Linux x86_64 | `rclone-browser-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it |
+| Windows 10/11 x64 | `rclone-browser-<version>-windows-x64-setup.exe` | Run the installer, or take the `.zip` for a portable copy |
+
+Each release also carries `SHA256SUMS`. To check what you downloaded:
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing    # shasum -a 256 -c on macOS
+```
+
+**rclone is not bundled.** Install it from
+[rclone.org/downloads](https://rclone.org/downloads/) — the application looks
+for it on your `PATH` and asks in Preferences if it cannot find it.
+
+### macOS: "cannot be opened because the developer cannot be verified"
+
+The bundle is ad-hoc signed rather than notarized, because notarizing needs a
+paid Apple Developer account. macOS therefore quarantines it on first launch.
+After dragging it to Applications:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/rclone-browser.app
+```
+
+### Linux: what the AppImage needs
+
+It bundles Qt, so the only requirement is a reasonably current system: **glibc
+2.39 or newer** (Ubuntu 24.04, Debian 13, Fedora 40 and up), plus FUSE for the
+AppImage itself, which most desktops already have. Without FUSE:
+
+```bash
+./rclone-browser-*.AppImage --appimage-extract-and-run
+```
+
+The floor comes from building on Ubuntu 24.04, which is also the oldest Ubuntu
+carrying the Qt 6.4 this needs. On an older distribution, build from source.
+
+### Windows: "Windows protected your PC"
+
+The installer is unsigned — a code-signing certificate is a yearly cost —
+so SmartScreen warns about it. **More info**, then **Run anyway**. The portable
+zip avoids the installer entirely.
+
+Windows builds are produced by CI but, unlike macOS and Linux, **nobody has
+run one yet**. See [Status](#status).
+
 ## What this fork changes
 
 ### It builds again
@@ -195,24 +248,39 @@ shipped during development, headlessly, in under a second.
 
 Disable with `-DRRM_BUILD_TESTS=OFF`. CI runs them on Linux and macOS.
 
-## Releasing (macOS)
+## Releasing
+
+Pushing a tag of the form `2.0.1` or `v2.0.1` runs
+[`.github/workflows/release.yml`](.github/workflows/release.yml), which builds
+all three artifacts, checksums them, and opens a **draft** release. Publishing
+is left as a deliberate step, since nothing is signed by a certificate any
+operating system trusts.
+
+Each artifact can also be built by hand, which is how they are developed:
 
 ```bash
-./scripts/release_macOS.sh --zip
+./scripts/release_macOS.sh --dmg     # macOS only, needs Homebrew Qt
+./scripts/release_AppImage.sh        # Linux only
+pwsh scripts/release_windows.ps1     # Windows only, Qt on PATH
 ```
 
-Builds, bundles the Qt frameworks, and produces a self-contained ~88 MB `.app`
-in `release/`.
+**macOS.** `macdeployqt` alone is not sufficient. It copies the frameworks in
+but leaves the build-time rpath pointing at the Homebrew Qt, so dyld loads Qt
+twice and warns that classes are "implemented in both"; it also leaves each
+copied library calling itself by its Homebrew path. The script fixes both,
+re-signs (every `install_name_tool` edit invalidates the signature), then walks
+every Mach-O in the bundle and fails if any of them still depends on — or names
+itself after — a path outside it. The disk image is verified and mounted, and
+the application inside it is checked for a valid signature before the script
+reports success.
 
-`macdeployqt` alone is not sufficient: it copies the frameworks in but leaves
-the build-time rpath pointing at the Homebrew Qt, so dyld loads Qt twice and
-warns that classes are "implemented in both". The script strips that rpath,
-points it at the bundled frameworks, re-signs (every `install_name_tool` edit
-invalidates the signature), and fails if the bundle still links against the Qt
-prefix.
+**Linux.** `linuxdeploy` with the Qt plugin, on Ubuntu 24.04 so that the glibc
+floor is chosen rather than inherited from whatever the runner happens to be.
+The offscreen platform plugin is bundled alongside `xcb` so the result can be
+started without a display; the script does exactly that as its final check.
 
-The result is ad-hoc signed, which is fine locally. On another Mac it will be
-quarantined; clear it with `xattr -dr com.apple.quarantine`.
+**Windows.** `windeployqt` plus Inno Setup, producing both an installer and a
+portable zip. This one has never run outside CI — see [Status](#status).
 
 ## Status
 
@@ -224,9 +292,11 @@ remotes, in light and dark mode.
 — in CI on every push, alongside macOS. The application has not been driven as
 a GUI there, so treat the interface as unproven even though the code is not.
 
-**Windows is unbuilt.** The Qt6 replacement for the Windows-only icon path
-(`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) has never been
-through a Windows compiler, and there is no Windows runner yet.
+**Windows is built but unproven.** The release workflow compiles it and
+produces an installer, so the Qt6 replacement for the Windows-only icon path
+(`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) does at least
+go through a Windows compiler now. Nobody has launched the result. If you try
+it, an issue saying so either way is genuinely useful.
 
 Qt 6.4 is the floor, set by Ubuntu 24.04 LTS and enforced in `find_package`.
 

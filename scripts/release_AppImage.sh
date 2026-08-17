@@ -1,167 +1,129 @@
-#!/bin/bash
+#!/usr/bin/env bash
+#
+# Builds a self-contained AppImage. Linux only -- run it on a Linux machine, in
+# CI, or through a container (scripts/preflight_linux.sh shows the pattern).
+#
+# Replaces the Qt5-era script, which assumed a hand-built CentOS 7 toolchain
+# from a comment block, a Qt unpacked under /opt, an OpenSSL 1.1.1 built from
+# source, and linuxdeploy already on PATH. None of that exists any more.
+#
+# The build happens on Ubuntu 24.04, which is what CI runs and what
+# preflight_linux.sh checks, so the AppImage carries that glibc floor: 2.39,
+# meaning Ubuntu 24.04, Debian 13, Fedora 40 or newer. Building on an older
+# distro would widen that, but Ubuntu 22.04 ships Qt 6.2 and this needs 6.4.
+#
+# Usage:  scripts/release_AppImage.sh
 
-set -e
+set -euo pipefail
 
-# x86_64 build on CentOS 7.7
-  # gcc 7 installed
-  # sudo yum install -y centos-release-scl
-  # sudo yum install -y devtoolset-7-gcc*
-  # run below command before build
-  # scl enable devtoolset-7 bash
+if [ "$(uname -s)" != "Linux" ]; then
+  echo "error: AppImages can only be built on Linux." >&2
+  echo "       From macOS, run this inside a container:" >&2
+  echo "         docker run --rm -v \"\$PWD:/src:ro\" ubuntu:24.04 ..." >&2
+  echo "       or let the release workflow do it." >&2
+  exit 1
+fi
 
-  # newer cmake is required than one included in CentOS 7
-  # download from http://www.cmake.org/download
-  # sudo mkdir /opt/cmake
-  # sudo sh cmake-$version.$build-Linux-x86_64.sh --prefix=/opt/cmake
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD="$ROOT/build-appimage"
+APPDIR="$BUILD/AppDir"
+RELEASE="$ROOT/release"
+TOOLS="${LINUXDEPLOY_CACHE:-$BUILD/tools}"
+ARCH="$(uname -m)"
+APP_NAME="rclone-browser"
 
-  if [ $(arch) = "x86_64" ]; then
-    CMAKE="/opt/cmake/bin/cmake"
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+if git -C "$ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
+  VERSION="$VERSION-$(git -C "$ROOT" rev-parse --short HEAD)"
+fi
+
+echo "==> Building $APP_NAME $VERSION for $ARCH"
+rm -rf "$BUILD"
+cmake -S "$ROOT" -B "$BUILD" \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/usr
+cmake --build "$BUILD" -j"$(nproc)"
+
+# The install rules already place the binary, the .desktop file and every icon
+# size where an AppDir wants them, so there is nothing to assemble by hand.
+echo "==> Installing into an AppDir"
+DESTDIR="$APPDIR" cmake --install "$BUILD" >/dev/null
+
+echo "==> Fetching linuxdeploy"
+mkdir -p "$TOOLS"
+fetch() {
+  local url="$1" out="$2"
+  if [ ! -x "$TOOLS/$out" ]; then
+    curl -fsSL "$url" -o "$TOOLS/$out"
+    chmod +x "$TOOLS/$out"
   fi
+}
+BASE="https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous"
+QT_BASE="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous"
+fetch "$BASE/linuxdeploy-$ARCH.AppImage" "linuxdeploy"
+fetch "$QT_BASE/linuxdeploy-plugin-qt-$ARCH.AppImage" "linuxdeploy-plugin-qt"
 
-# i686 build on Ubuntu 16.04 LTS
+echo "==> Bundling Qt"
+# Containers and CI runners have no FUSE, which an AppImage normally needs to
+# mount itself; this makes the tools unpack and run instead. It applies to
+# building, not to the AppImage produced.
+export APPIMAGE_EXTRACT_AND_RUN=1
+# The plugin looks for "qmake" first, which on Ubuntu is Qt 5 or absent.
+export QMAKE="${QMAKE:-/usr/bin/qmake6}"
+export EXTRA_QT_MODULES="${EXTRA_QT_MODULES:-}"
+# xcb is all the plugin bundles by default, which is right for a desktop but
+# leaves no way to start the application where there is no display -- neither
+# in CI nor in the check at the end of this script. The offscreen plugin is
+# about 50KB and makes it testable.
+export EXTRA_PLATFORM_PLUGINS="${EXTRA_PLATFORM_PLUGINS:-libqoffscreen.so}"
+# Without this the file is named after the .desktop entry, with the version
+# from the environment appended in a shape of linuxdeploy's choosing.
+export VERSION
 
-# armv7l build on raspbian stretch
+( cd "$BUILD" && "$TOOLS/linuxdeploy" \
+    --appdir "$APPDIR" \
+    --plugin qt \
+    --output appimage )
 
-# Qt path and flags set in env e.g.:
-# export PATH="/opt/Qt/5.14.0/bin/:$PATH"
-# export CPPFLAGS="-I/opt/Qt/5.14.0/bin/include/"
-# export LDFLAGS="-L/opt/Qt/5.14.0/bin/lib/"
-# export LD_LIBRARY_PATH="/opt/Qt/5.14.0/bin/lib/:$LD_LIBRARY_PATH"
+mkdir -p "$RELEASE"
+OUT="$RELEASE/$APP_NAME-$VERSION-linux-$ARCH.AppImage"
+mv "$BUILD"/*.AppImage "$OUT"
+chmod +x "$OUT"
 
-# for x86_64 and i686 platform
-# Qt 5.14.0 uses openssl 1.1 and some older distros still use 1.0
-# we build openssl 1.1.1d from source using following setup:
-# ./config shared --prefix=/opt/openssl-1.1.1/ && make --jobs=`nproc --all` && sudo make install
-# and add to build env
-# export LD_LIBRARY_PATH="/opt/openssl-1.1.1/lib/:$LD_LIBRARY_PATH"
+echo "==> Verifying"
+# Does it hold together: unpack it, and check the binary inside links only to
+# libraries that are either bundled or part of any Linux system.
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+( cd "$WORK" && "$OUT" --appimage-extract >/dev/null )
 
-if [ "$1" = "SIGN" ]; then
-  export SIGN="1"
+if [ ! -x "$WORK/squashfs-root/usr/bin/$APP_NAME" ]; then
+  echo "error: no $APP_NAME binary inside the AppImage" >&2
+  exit 1
+fi
+for LIB in libQt6Core libQt6Widgets libQt6Gui libQt6Network; do
+  if ! find "$WORK/squashfs-root" -name "$LIB.so*" | grep -q .; then
+    echo "error: $LIB is missing from the AppImage" >&2
+    exit 1
+  fi
+done
+
+# And does it actually start. There is no headless mode to ask for, so it runs
+# against the offscreen platform for a few seconds: still running when the
+# timeout fires is the pass, since a missing library or plugin aborts at once.
+echo "==> Starting it"
+set +e
+QT_QPA_PLATFORM=offscreen APPIMAGE_EXTRACT_AND_RUN=1 timeout 10 "$OUT" >"$WORK/run.log" 2>&1
+CODE=$?
+set -e
+if [ "$CODE" -ne 124 ] && [ "$CODE" -ne 0 ]; then
+  echo "error: it exited with $CODE instead of running:" >&2
+  tail -20 "$WORK/run.log" >&2
+  exit 1
 fi
 
-# check gcc version on Centos
-if [ $(arch) = "x86_64" ]; then
-  currentver="$(gcc -dumpversion)"
-  if [ "${currentver:0:1}" -lt "7"  ]; then
-    echo "gcc version 7 or newer required"
-    echo "on Cetos 7 run"
-    echo "scl enable devtoolset-7 bash"
-    exit
- fi
-fi
-
-# building AppImage in temporary directory to keep system clean
-# use RAM disk if possible (as in: not building on CI system like Travis, and RAM disk is available)
-if [ "$CI" == "" ] && [ -d /dev/shm ]; then
-  TEMP_BASE=/dev/shm
-else
-  TEMP_BASE=/tmp
-fi
-
-# we run it from our project scripts folder
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"/..
-VERSION=$(cat "$ROOT"/VERSION)-$(git rev-parse --short HEAD)
-# linuxdeploy uses $VERSION env variable for AppImage name
-export VERSION=$VERSION
-BUILD="$ROOT"/build
-TARGET=rclone-browser-$VERSION.AppImage
-
-# clean AppImage temporary folder
-if [ -d "$TEMP_BASE/$TARGET" ]; then
-  rm -rf "$TEMP_BASE/$TARGET"
-fi
-mkdir "$TEMP_BASE/$TARGET"
-
-# clean build folder
-if [ -d "$BUILD" ]; then
-  rm -rf "$BUILD"
-fi
-mkdir "$BUILD"
-
-# create release folder if does not exist
-mkdir -p "$ROOT"/release
-
-# clean current version previous build
-if [ $(arch) = "armv7l" ] && [ -f "$ROOT"/release/rclone-browser-"$VERSION"-armhf.AppImage ]; then
-  rm "$ROOT"/release/rclone-browser-"$VERSION"-raspberrypi-armhf.AppImage
-fi
-
-if [ $(arch) = "i686" ] && [ -f "$ROOT"/release/rclone-browser-"$VERSION"-i386.AppImage ]; then
-  rm "$ROOT"/release/rclone-browser-"$VERSION"-linux-i386.AppImage
-fi
-
-if [ $(arch) = "x86_64" ] && [ -f "$ROOT"/release/rclone-browser-"$VERSION"-x86_64.AppImage ]; then
-  rm "$ROOT"/release/rclone-browser-"$VERSION"-linux-x86_64.AppImage
-fi
-
-# build and install to temporary AppDir folder
-cd "$BUILD"
-
-if [ $(arch) = "armv7l" ]; then
-  # more threads need swap on 1GB RAM RPi
-  cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-  make -j 2
-fi
-
-if [ $(arch) = "x86_64" ]; then
-  "$CMAKE" .. -DCMAKE_INSTALL_PREFIX=/usr
-  make --jobs=$(nproc --all)
-fi
-
-if [ $(arch) = "i686" ]; then
-  cmake .. -DCMAKE_INSTALL_PREFIX=/usr
-  make --jobs=$(nproc --all)
-fi
-
-make install DESTDIR="$TEMP_BASE"/"$TARGET"/AppDir
-
-# prepare AppImage
-cd "$TEMP_BASE/$TARGET"
-
-# metainfo file
-#mkdir $TEMP_BASE/$TARGET/AppDir/usr/share/metainfo
-#cp $ROOT/assets/rclone-browser.appdata.xml $TEMP_BASE/$TARGET/AppDir/usr/share/metainfo/
-
-# copy info files to AppImage
-cp "$ROOT"/README.md "$TEMP_BASE"/"$TARGET"/AppDir/Readme.md
-cp "$ROOT"/CHANGELOG.md "$TEMP_BASE"/"$TARGET"/AppDir/Changelog.md
-cp "$ROOT"/LICENSE "$TEMP_BASE"/"$TARGET"/AppDir/License.txt
-
-# https://github.com/linuxdeploy/linuxdeploy
-# https://github.com/linuxdeploy/linuxdeploy-plugin-qt
-linuxdeploy --appdir AppDir --desktop-file=AppDir/usr/share/applications/rclone-browser.desktop --plugin qt
-#linuxdeploy-plugin-qt --appdir AppDir
-
-if [ $(arch) != "armv7l" ]
-then
-  # we add openssl 1.1.1 libs needed for distros still using openssl 1.0
-  cp /opt/openssl-1.1.1/lib/libssl.so.1.1 ./AppDir/usr/bin/
-  cp /opt/openssl-1.1.1/lib/libcrypto.so.1.1 ./AppDir/usr/bin/
-fi
-
-# https://github.com/linuxdeploy/linuxdeploy-plugin-appimage
-linuxdeploy-plugin-appimage --appdir=AppDir
-
-# raspberry pi build
-if [ $(arch) = "armv7l" ]; then
-  rename 's/armhf/raspberrypi-armhf/' Rclone_Browser*
-  rename 's/Rclone_Browser/rclone-browser/' Rclone_Browser*
-fi
-
-# x86 build
-if [ $(arch) = "i686" ]; then
-  rename 's/i386/linux-i386/' Rclone_Browser*
-  rename 's/Rclone_Browser/rclone-browser/' Rclone_Browser*
-fi
-
-# x86_64 build
-if [ $(arch) = "x86_64" ]; then
-  rename x86_64 linux-x86_64 Rclone_Browser*
-  rename Rclone_Browser rclone-browser Rclone_Browser*
-fi
-
-cp ./*AppImage "$ROOT"/release/
-
-# clean AppImage temporary folder
-cd ..
-rm -rf "$TARGET"
+echo
+echo "Done: $OUT  ($(du -sh "$OUT" | cut -f1))"
+echo
+echo "It needs no installation: make it executable and run it."
+echo "  chmod +x $(basename "$OUT") && ./$(basename "$OUT")"

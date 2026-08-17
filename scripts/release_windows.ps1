@@ -1,0 +1,111 @@
+# Builds the Windows release: a portable zip and an installer.
+#
+# Replaces release_windows.cmd, which was written for Qt 5.13 and Visual Studio
+# 2019 at hardcoded paths, copied OpenSSL 1.1.1 DLLs from a directory the
+# builder was expected to have created by hand, shelled out to 7-Zip, and
+# deployed a file called RcloneBrowser.exe -- a name this fork no longer
+# builds. It also built 32-bit, which Qt 6 does not support.
+#
+# Everything comes from the environment now: Qt through CMAKE_PREFIX_PATH or
+# windeployqt on PATH, the compiler through whatever the shell already has.
+# That is what makes it run unchanged on a CI runner and on a developer's
+# machine.
+#
+# Usage:  pwsh scripts/release_windows.ps1 [-Arch x64]
+#
+# NOTE: unlike the macOS and AppImage scripts, this one has never been run.
+# There is no Windows machine here, so CI is its first execution.
+
+param(
+    [ValidateSet('x64', 'arm64')]
+    [string]$Arch = 'x64'
+)
+
+$ErrorActionPreference = 'Stop'
+
+$Root = Split-Path -Parent $PSScriptRoot
+$Build = Join-Path $Root 'build-release'
+$Release = Join-Path $Root 'release'
+$AppName = 'rclone-browser'
+
+$Version = (Get-Content (Join-Path $Root 'VERSION') -Raw).Trim()
+try {
+    $Commit = (git -C $Root rev-parse --short HEAD).Trim()
+    if ($Commit) { $Version = "$Version-$Commit" }
+} catch {
+    # A source archive with no git metadata is still buildable.
+}
+
+$StageName = "$AppName-$Version-windows-$Arch"
+$Stage = Join-Path $Release $StageName
+
+Write-Host "==> Building $AppName $Version for $Arch"
+if (Test-Path $Build) { Remove-Item -Recurse -Force $Build }
+cmake -S $Root -B $Build -DCMAKE_BUILD_TYPE=Release
+if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
+cmake --build $Build --config Release
+if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+
+# Single-config generators put it in build/, multi-config in build/Release.
+$Exe = Get-ChildItem -Path $Build -Recurse -Filter "$AppName.exe" |
+    Select-Object -First 1
+if (-not $Exe) { throw "no $AppName.exe was produced" }
+
+Write-Host "==> Staging into $StageName"
+if (Test-Path $Stage) { Remove-Item -Recurse -Force $Stage }
+New-Item -ItemType Directory -Path $Stage -Force | Out-Null
+
+Copy-Item $Exe.FullName $Stage
+Copy-Item (Join-Path $Root 'README.md') (Join-Path $Stage 'Readme.md')
+Copy-Item (Join-Path $Root 'CHANGELOG.md') (Join-Path $Stage 'Changelog.md')
+Copy-Item (Join-Path $Root 'LICENSE') (Join-Path $Stage 'License.txt')
+
+Write-Host '==> Bundling Qt'
+# --no-translations keeps the download small; the application has no
+# translations of its own. The image format plugins stay: the icon cache reads
+# whatever the shell hands it.
+windeployqt --release --no-translations --no-compiler-runtime `
+    (Join-Path $Stage "$AppName.exe")
+if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+Write-Host '==> Verifying the staged application'
+foreach ($dll in @('Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll')) {
+    if (-not (Test-Path (Join-Path $Stage $dll))) {
+        throw "$dll is missing from the staged application"
+    }
+}
+if (-not (Test-Path (Join-Path $Stage 'platforms\qwindows.dll'))) {
+    throw 'the Windows platform plugin is missing; the application would not start'
+}
+
+Write-Host '==> Zipping'
+$Zip = Join-Path $Release "$StageName.zip"
+if (Test-Path $Zip) { Remove-Item -Force $Zip }
+Compress-Archive -Path $Stage -DestinationPath $Zip
+
+# Inno Setup is not part of a normal Qt install, so the installer is optional:
+# the zip above is a complete, portable copy either way.
+$Iscc = Get-Command iscc.exe -ErrorAction SilentlyContinue
+if (-not $Iscc) {
+    $Candidate = 'C:\Program Files (x86)\Inno Setup 6\iscc.exe'
+    if (Test-Path $Candidate) { $Iscc = $Candidate } else { $Iscc = $null }
+} else {
+    $Iscc = $Iscc.Source
+}
+
+if ($Iscc) {
+    Write-Host '==> Building the installer'
+    & $Iscc `
+        "/dMyAppVersion=$((Get-Content (Join-Path $Root 'VERSION') -Raw).Trim())" `
+        "/dMyAppDir=$StageName" `
+        "/dMyAppArch=$Arch" `
+        "/O$Release" `
+        "/F$StageName-setup" `
+        (Join-Path $PSScriptRoot 'rclone-browser-win-installer.iss')
+    if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
+    Write-Host "Done: $Release\$StageName-setup.exe"
+} else {
+    Write-Host 'Inno Setup not found, so no installer was built (the zip is complete).'
+}
+
+Write-Host "Done: $Zip"
