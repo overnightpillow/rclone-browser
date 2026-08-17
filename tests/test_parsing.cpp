@@ -16,6 +16,18 @@ private slots:
   void rcloneNotAnArray();
   void rcloneAwkwardFilenames();
 
+  void statsTotals();
+  void statsTotalsBeforeRateIsKnown();
+  void statsTotalsSiUnits();
+  void statsTotalsBeforeRclone143();
+  void statsErrorsWithRetryHint();
+  void statsChecksWithListedSuffix();
+  void statsFileCount();
+  void statsElapsed();
+  void statsFileProgress();
+  void statsFileProgressBeforeRateIsKnown();
+  void statsLogLinesAreNotStats();
+
   void resticSnapshotsNewestFirst();
   void resticSnapshotsMalformed();
 
@@ -100,6 +112,149 @@ void TestParsing::rcloneAwkwardFilenames() {
   QCOMPARE(entries[0].name, QString("quote\"name.txt"));
   QCOMPARE(entries[1].name, QString("line\nbreak.txt"));
   QCOMPARE(entries[2].name, QString("  leading and trailing  "));
+}
+
+// The stats fixtures below are byte-for-byte lines from rclone 1.71, tab and
+// all, captured from a bandwidth-limited local copy and from a copy of an
+// unreadable file. The exception is the 1.43-1.55 and pre-1.43 forms, which no
+// longer reachable rclone emits; those are the shapes the previous patterns
+// were written against, kept so that the parser stays backward compatible.
+//
+// This is the regression the whole file exists for: rclone 1.56 moved from
+// "1.234G / 5.678 GBytes" to "3.027 MiB / 120 MiB", the old pattern matched
+// neither, and Size, Total size, Bandwidth and ETA were blank for every
+// transfer.
+void TestParsing::statsTotals() {
+  const RcloneStats stats = ParseRcloneStats(
+      "Transferred:   \t    3.027 MiB / 120 MiB, 3%, 3.027 MiB/s, ETA 38s");
+
+  QCOMPARE(stats.kind, RcloneStats::Totals);
+  QCOMPARE(stats.size, QString("3.027 MiB"));
+  QCOMPARE(stats.totalSize, QString("120 MiB"));
+  QCOMPARE(stats.percent, QString("3%"));
+  QCOMPARE(stats.bandwidth, QString("3.027 MiB/s"));
+  QCOMPARE(stats.eta, QString("38s"));
+}
+
+void TestParsing::statsTotalsBeforeRateIsKnown() {
+  // rclone prints "-" for the percentage and the ETA until it has both a total
+  // and a rate. A pattern demanding digits there blanks the panel for the
+  // first seconds of every job, and for the whole of a stalled one.
+  const RcloneStats stats = ParseRcloneStats(
+      "Transferred:   \t          0 B / 0 B, -, 0 B/s, ETA -");
+
+  QCOMPARE(stats.kind, RcloneStats::Totals);
+  QCOMPARE(stats.size, QString("0 B"));
+  QCOMPARE(stats.totalSize, QString("0 B"));
+  QCOMPARE(stats.percent, QString("-"));
+  QCOMPARE(stats.bandwidth, QString("0 B/s"));
+  QCOMPARE(stats.eta, QString("-"));
+}
+
+void TestParsing::statsTotalsSiUnits() {
+  // rclone 1.43 to 1.55: SI units, number and unit run together on the left.
+  const RcloneStats stats = ParseRcloneStats(
+      "Transferred:   1.234G / 5.678 GBytes, 22%, 1.234 MBytes/s, ETA 1h2m3s");
+
+  QCOMPARE(stats.kind, RcloneStats::Totals);
+  QCOMPARE(stats.size, QString("1.234G"));
+  QCOMPARE(stats.totalSize, QString("5.678 GBytes"));
+  QCOMPARE(stats.percent, QString("22%"));
+  QCOMPARE(stats.bandwidth, QString("1.234 MBytes/s"));
+  QCOMPARE(stats.eta, QString("1h2m3s"));
+}
+
+void TestParsing::statsTotalsBeforeRclone143() {
+  // Until 1.42 there was no total and no ETA, only a running count and a rate.
+  const RcloneStats stats =
+      ParseRcloneStats("Transferred:   100 Bytes (50 Bytes/sec)");
+
+  QCOMPARE(stats.kind, RcloneStats::Totals);
+  QCOMPARE(stats.size, QString("100 Bytes"));
+  QCOMPARE(stats.bandwidth, QString("50 Bytes/sec"));
+  QVERIFY(stats.totalSize.isEmpty());
+  QVERIFY(stats.eta.isEmpty());
+}
+
+void TestParsing::statsErrorsWithRetryHint() {
+  // The suffix is why the error count never appeared: the pattern was anchored
+  // to the end of the line, so the only lines it could match were the ones
+  // reporting no errors at all.
+  const RcloneStats stats =
+      ParseRcloneStats("Errors:                 1 (retrying may help)");
+
+  QCOMPARE(stats.kind, RcloneStats::Errors);
+  QCOMPARE(stats.text, QString("1"));
+
+  const RcloneStats plain = ParseRcloneStats("Errors:                 0");
+  QCOMPARE(plain.kind, RcloneStats::Errors);
+  QCOMPARE(plain.text, QString("0"));
+}
+
+void TestParsing::statsChecksWithListedSuffix() {
+  // ", Listed N" arrived in rclone 1.60 and broke this line the same way.
+  const RcloneStats stats =
+      ParseRcloneStats("Checks:                 0 / 0, -, Listed 1");
+
+  QCOMPARE(stats.kind, RcloneStats::Checks);
+  QCOMPARE(stats.text, QString("0 / 0, -"));
+
+  const RcloneStats older = ParseRcloneStats("Checks:                 1 / 2, 50%");
+  QCOMPARE(older.kind, RcloneStats::Checks);
+  QCOMPARE(older.text, QString("1 / 2, 50%"));
+}
+
+void TestParsing::statsFileCount() {
+  // Same prefix as the byte totals, so order of matching decides which wins.
+  const RcloneStats stats =
+      ParseRcloneStats("Transferred:            0 / 1, 0%");
+
+  QCOMPARE(stats.kind, RcloneStats::FileCount);
+  QCOMPARE(stats.text, QString("0 / 1, 0%"));
+}
+
+void TestParsing::statsElapsed() {
+  const RcloneStats stats = ParseRcloneStats("Elapsed time:         1.9s");
+
+  QCOMPARE(stats.kind, RcloneStats::Elapsed);
+  QCOMPARE(stats.text, QString("1.9s"));
+}
+
+void TestParsing::statsFileProgress() {
+  const RcloneStats stats = ParseRcloneStats(
+      " *                                       big.bin:  3% /120Mi, 2.027Mi/s, 57s");
+
+  QCOMPARE(stats.kind, RcloneStats::FileProgress);
+  QCOMPARE(stats.name, QString("big.bin"));
+  QCOMPARE(stats.filePercent, 3);
+  QCOMPARE(stats.fileDetail, QString("3% /120Mi, 2.027Mi/s, 57s"));
+}
+
+void TestParsing::statsFileProgressBeforeRateIsKnown() {
+  // "0/s" and "-" in the first second of a transfer. The old \w+ ETA capture
+  // rejected the dash, so a file's bar did not appear until rclone had a rate.
+  const RcloneStats stats = ParseRcloneStats(
+      " *                                       big.bin:  1% /120Mi, 0/s, -");
+
+  QCOMPARE(stats.kind, RcloneStats::FileProgress);
+  QCOMPARE(stats.name, QString("big.bin"));
+  QCOMPARE(stats.filePercent, 1);
+}
+
+void TestParsing::statsLogLinesAreNotStats() {
+  // Most of rclone's output is log lines, and none of them should light up a
+  // field. The last one is the trap: it starts like the stats block.
+  const QStringList lines = {
+      "",
+      "2026/08/16 20:12:11 INFO  : big.bin: Copied (server-side copy)",
+      "2026/08/16 20:12:11 INFO  : Starting bandwidth limiter at 2Mi Byte/s",
+      "Server Side Copies:     1 @ 120 MiB",
+      "Transferring:",
+  };
+
+  for (const QString &line : lines) {
+    QCOMPARE(ParseRcloneStats(line).kind, RcloneStats::Unknown);
+  }
 }
 
 void TestParsing::resticSnapshotsNewestFirst() {

@@ -20,7 +20,6 @@ QString root = isLocal ? "/" : QString();
 
   auto settings = GetSettings();
   QString rcloneVersion = settings->value("Settings/rcloneVersion").toString();
-  settings->setValue("Settings/driveShared", Qt::Unchecked);
   ui.checkBoxShared->setChecked(false);
   ui.checkBoxShared->setDisabled(!isGoogle);
   // hide checkBoxShared for non Google remotes
@@ -203,20 +202,12 @@ QString root = isLocal ? "/" : QString();
       });
 
   QObject::connect(ui.refresh, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
     model->refresh(index);
   });
 
   QObject::connect(ui.mkdir, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
@@ -236,7 +227,7 @@ QString root = isLocal ? "/" : QString();
       UseRclonePassword(&process);
       process.setProgram(GetRclone());
       process.setArguments(QStringList() << "mkdir" << GetRcloneConf()
-                                         << GetDriveSharedWithMe()
+                                         << driveSharedArgs()
                                          << GetDefaultRcloneOptionsList()
                                          << remote + ":" + folder);
       process.setProcessChannelMode(QProcess::MergedChannels);
@@ -250,10 +241,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.rename, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
@@ -269,7 +256,7 @@ QString root = isLocal ? "/" : QString();
       UseRclonePassword(&process);
       process.setProgram(GetRclone());
       process.setArguments(
-          QStringList() << "moveto" << GetRcloneConf() << GetDriveSharedWithMe()
+          QStringList() << "moveto" << GetRcloneConf() << driveSharedArgs()
                         << GetDefaultRcloneOptionsList() << remote + ":" + path
                         << remote + ":" +
                                model->path(index.parent()).filePath(name));
@@ -283,42 +270,41 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.move, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
     QString path = model->path(index).path();
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
-    QString name = model->path(index.parent()).path() + "/";
-    name = QInputDialog::getText(this, "Move",
-                                 QString("New location for %1").arg(pathMsg),
-                                 QLineEdit::Normal, name);
-    if (!name.isEmpty()) {
+    // The prompt asks for the full destination path, and is seeded with the
+    // current one, because that is what the command below actually takes.
+    QString name = QInputDialog::getText(
+        this, "Move", QString("New full path for %1").arg(pathMsg),
+        QLineEdit::Normal, path);
+    if (!name.isEmpty() && name != path) {
       QProcess process;
       UseRclonePassword(&process);
       process.setProgram(GetRclone());
+      // moveto, not move: "rclone move src dst" moves the *contents* of src
+      // into dst, so moving a folder scattered its files into the destination
+      // and left the folder itself behind, empty. moveto moves the thing
+      // named to the name given, for a file or a folder alike.
       process.setArguments(
-          QStringList() << "move" << GetRcloneConf() << GetDriveSharedWithMe()
+          QStringList() << "moveto" << GetRcloneConf() << driveSharedArgs()
                         << GetDefaultRcloneOptionsList() << remote + ":" + path
                         << remote + ":" + name);
       process.setProcessChannelMode(QProcess::MergedChannels);
 
       ProgressDialog progress("Move", "Moving...", pathMsg, &process, this);
       if (progress.exec() == QDialog::Accepted) {
-        model->refresh(index);
+        // The parent, not the item: what was moved is no longer there, and
+        // refreshing it listed a path that no longer exists.
+        model->refresh(index.parent());
       }
     }
   });
 
   QObject::connect(ui.purge, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
@@ -335,7 +321,7 @@ QString root = isLocal ? "/" : QString();
       process.setProgram(GetRclone());
       process.setArguments(QStringList()
                            << (model->isFolder(index) ? "purge" : "delete")
-                           << GetRcloneConf() << GetDriveSharedWithMe()
+                           << GetRcloneConf() << driveSharedArgs()
                            << GetDefaultRcloneOptionsList()
                            << remote + ":" + path);
       process.setProcessChannelMode(QProcess::MergedChannels);
@@ -352,10 +338,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.mount, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
@@ -374,15 +356,13 @@ QString root = isLocal ? "/" : QString();
 #endif
 
     if (!folder.isEmpty()) {
-      emit addMount(remote + ":" + path, folder);
+      emit addMount(remote + ":" + path, folder,
+                    ui.checkBoxShared->isChecked());
     }
   });
 
   QObject::connect(ui.stream, &QAction::triggered, this, [=]() {
     auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
     QString path = model->path(index).path();
@@ -412,8 +392,11 @@ QString root = isLocal ? "/" : QString();
                    &QAction::toggled);
 
   QObject::connect(ui.shared, &QAction::toggled, this, [=](const bool checked) {
-    auto settings = GetSettings();
-    settings->setValue("Settings/driveShared", checked);
+    // The model does its own listing, so it needs the flag directly. It used
+    // to read a global setting that every open tab wrote to, so turning
+    // "shared with me" on in one Drive tab silently changed what the others
+    // listed -- and which of them won depended on which had last been clicked.
+    model->setDriveSharedWithMe(checked);
     ui.checkBoxShared->setChecked(checked);
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
@@ -428,10 +411,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.link, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
@@ -442,7 +421,7 @@ QString root = isLocal ? "/" : QString();
     UseRclonePassword(&process);
     process.setProgram(GetRclone());
     process.setArguments(
-        QStringList() << "link" << GetRcloneConf() << GetDriveSharedWithMe()
+        QStringList() << "link" << GetRcloneConf() << driveSharedArgs()
                       << GetDefaultRcloneOptionsList() << remote + ":" + path);
     process.setProcessChannelMode(QProcess::MergedChannels);
     ProgressDialog progress("Fetch Public Link", "Fetching link for...",
@@ -453,10 +432,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.upload, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
@@ -465,7 +440,8 @@ QString root = isLocal ? "/" : QString();
     }
     QDir path = model->path(index);
 
-    TransferDialog t(false, false, remote, path, true, this);
+    TransferDialog t(false, false, remote, path, true, this, nullptr,
+                     false, ui.checkBoxShared->isChecked());
     if (t.exec() == QDialog::Accepted) {
       QString src = t.getSource();
       QString dst = t.getDest();
@@ -477,15 +453,12 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.download, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
     QDir path = model->path(index);
 
-    TransferDialog t(true, false, remote, path, model->isFolder(index), this);
+    TransferDialog t(true, false, remote, path, model->isFolder(index), this,
+                     nullptr, false, ui.checkBoxShared->isChecked());
     if (t.exec() == QDialog::Accepted) {
       QString src = t.getSource();
       QString dst = t.getDest();
@@ -497,10 +470,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.getTree, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
     QString path = model->path(index).path();
@@ -511,7 +480,7 @@ QString root = isLocal ? "/" : QString();
     process.setProgram(GetRclone());
     process.setArguments(
         QStringList() << "tree"
-                      << "-d" << GetRcloneConf() << GetDriveSharedWithMe()
+                      << "-d" << GetRcloneConf() << driveSharedArgs()
                       << GetDefaultRcloneOptionsList() << remote + ":" + path);
     process.setProcessChannelMode(QProcess::MergedChannels);
     ProgressDialog progress("Show directories tree", "Processing...", pathMsg,
@@ -523,10 +492,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.getSize, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
     QString path = model->path(index).path();
@@ -536,7 +501,7 @@ QString root = isLocal ? "/" : QString();
     UseRclonePassword(&process);
     process.setProgram(GetRclone());
     process.setArguments(
-        QStringList() << "size" << GetRcloneConf() << GetDriveSharedWithMe()
+        QStringList() << "size" << GetRcloneConf() << driveSharedArgs()
                       << GetDefaultRcloneOptionsList() << remote + ":" + path);
     process.setProcessChannelMode(QProcess::MergedChannels);
     ProgressDialog progress("Get Size", "Calculating...", pathMsg, &process,
@@ -547,10 +512,6 @@ QString root = isLocal ? "/" : QString();
   });
 
   QObject::connect(ui.export_, &QAction::triggered, this, [=]() {
-    auto settings = GetSettings();
-    bool driveShared = ui.checkBoxShared->checkState();
-    (driveShared ? settings->setValue("Settings/driveShared", Qt::Checked)
-                 : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
     QDir path = model->path(index);
@@ -575,7 +536,7 @@ QString root = isLocal ? "/" : QString();
       UseRclonePassword(&process);
       process.setProgram(GetRclone());
       process.setArguments(QStringList()
-                           << GetRcloneConf() << GetDriveSharedWithMe()
+                           << GetRcloneConf() << driveSharedArgs()
                            << GetDefaultRcloneOptionsList() << e.getOptions());
       process.setProcessChannelMode(QProcess::MergedChannels);
 
@@ -612,40 +573,65 @@ QString root = isLocal ? "/" : QString();
 
   QObject::connect(
       model, &ItemModel::drop, this,
-      [=](const QDir &path, const QModelIndex &parent) {
-        auto settings = GetSettings();
-        bool driveShared = ui.checkBoxShared->checkState();
-        (driveShared
-             ? settings->setValue("Settings/driveShared", Qt::Checked)
-             : settings->setValue("Settings/driveShared", Qt::Unchecked));
+      [=](const QList<QDir> &paths, const QModelIndex &parent) {
+        if (paths.isEmpty()) {
+          return;
+        }
 
         this->activateWindow();
-        QDir destPath = model->path(parent);
-        QString dest = QFileInfo(path.path()).isDir()
-                           ? destPath.filePath(path.dirName())
-                           : destPath.path();
+        const QDir destPath = model->path(parent);
 
-        TransferDialog t(false, true, remote, dest, true, this);
-        t.setSource(path.path());
+        // A folder is uploaded into a folder of its own name, so that dropping
+        // "photos" produces "photos" at the destination rather than emptying
+        // its contents into the target. A file goes straight in.
+        auto destinationFor = [](const QDir &base, const QDir &source) {
+          return QFileInfo(source.path()).isDir()
+                     ? base.filePath(source.dirName())
+                     : base.path();
+        };
 
-        if (t.exec() == QDialog::Accepted) {
-          QString src = t.getSource();
-          QString dst = t.getDest();
+        // One dialog for the whole drop. With several items the destination
+        // shown is the folder they land in; with one it is the exact
+        // destination, as it has always been.
+        const bool single = paths.size() == 1;
+        const QString dialogDest =
+            single ? destinationFor(destPath, paths.first()) : destPath.path();
 
-          QStringList args = t.getOptions();
-          emit addTransfer(QString("%1 from %2").arg(t.getMode()).arg(src), src,
-                           dst, args);
+        TransferDialog t(false, true, remote, dialogDest, true, this, nullptr,
+                         false, ui.checkBoxShared->isChecked());
+
+        QStringList sources;
+        sources.reserve(paths.size());
+        for (const QDir &path : paths) {
+          sources.append(path.path());
+        }
+        t.setSources(sources);
+
+        if (t.exec() != QDialog::Accepted) {
+          return;
+        }
+
+        // The options are read once, from the one dialog, and then re-pointed
+        // at each dropped item in turn: one job per item, all configured the
+        // same way.
+        JobOptions options = *t.getJobOptions();
+        const QString chosenDest = t.getDest();
+
+        for (const QDir &path : paths) {
+          options.source = single ? t.getSource() : path.path();
+          options.dest =
+              single ? chosenDest
+                     : destinationFor(QDir(chosenDest), path);
+
+          emit addTransfer(
+              QString("%1 from %2").arg(t.getMode()).arg(options.source),
+              options.source, options.dest, options.getOptions());
         }
       });
 
   QObject::connect(
       ui.tree, &QWidget::customContextMenuRequested, this,
       [=](const QPoint &pos) {
-        auto settings = GetSettings();
-        bool driveShared = ui.checkBoxShared->checkState();
-        (driveShared
-             ? settings->setValue("Settings/driveShared", Qt::Checked)
-             : settings->setValue("Settings/driveShared", Qt::Unchecked));
 
         QMenu menu;
         menu.addAction(ui.refresh);
@@ -743,3 +729,8 @@ QString root = isLocal ? "/" : QString();
 }
 
 RemoteWidget::~RemoteWidget() {}
+
+QStringList RemoteWidget::driveSharedArgs() const {
+  return ui.checkBoxShared->isChecked() ? QStringList{"--drive-shared-with-me"}
+                                        : QStringList();
+}

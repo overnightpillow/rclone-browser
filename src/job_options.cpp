@@ -128,14 +128,22 @@ QStringList JobOptions::getOptions() const {
   }
 
   if (!excluded.isEmpty()) {
-    for (auto line : excluded.split('\n')) {
-      list << "--exclude" << line;
+    // A trailing newline in the box, or a blank line between patterns, used to
+    // become --exclude "" -- which rclone reads as a pattern matching nothing
+    // useful, not as an absent option.
+    for (const QString &line : excluded.split('\n')) {
+      const QString pattern = line.trimmed();
+      if (!pattern.isEmpty()) {
+        list << "--exclude" << pattern;
+      }
     }
   }
 
   if (!extra.isEmpty()) {
-    for (auto arg : extra.split(' ')) {
-      list << arg;
+    for (const QString &arg : extra.split(' ')) {
+      if (!arg.trimmed().isEmpty()) {
+        list << arg;
+      }
     }
   }
 

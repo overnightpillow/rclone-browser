@@ -27,9 +27,16 @@ void StyleTreeView(QTreeView *tree);
 // wherever they appear.
 void StyleToolBar(QToolBar *toolBar);
 
-QStringList GetDriveSharedWithMe();
+// There is deliberately no GetDriveSharedWithMe() here any more: "shared with
+// me" is a property of one Drive tab, and reading it from a global setting is
+// what let two tabs fight over it. ItemModel and RemoteWidget each hold their
+// own, and pass it to whatever they run.
 QStringList GetDefaultRcloneOptionsList();
 QStringList GetShowHidden();
+
+// Joins an argument list into a command line that can be pasted into a
+// terminal, quoting the arguments that need it for the platform's shell.
+QString BuildCommandLine(const QStringList &args);
 
 // Returns 0 if equal, 1 if version1 is newer, 2 if version2 is newer.
 // Non-numeric components (e.g. the "0-beta" in "1.65.0-beta") compare as their

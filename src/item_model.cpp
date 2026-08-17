@@ -350,12 +350,21 @@ bool ItemModel::canDropMimeData(const QMimeData *data, Qt::DropAction action,
     return false;
   }
 
-  auto urls = data->urls();
-  if (urls.count() == 1) {
-    return urls.front().isLocalFile();
+  const auto urls = data->urls();
+  if (urls.isEmpty()) {
+    return false;
   }
 
-  return false;
+  // Every dropped item has to be a local file or folder; a selection of five
+  // used to be refused outright, because only a drop of exactly one was
+  // accepted.
+  for (const QUrl &url : urls) {
+    if (!url.isLocalFile()) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool ItemModel::dropMimeData(const QMimeData *data, Qt::DropAction action,
@@ -364,10 +373,18 @@ bool ItemModel::dropMimeData(const QMimeData *data, Qt::DropAction action,
     return false;
   }
 
-  QDir path = QDir(data->urls().front().toLocalFile());
+  QList<QDir> paths;
+  const auto urls = data->urls();
+  paths.reserve(urls.size());
+  for (const QUrl &url : urls) {
+    paths.append(QDir(url.toLocalFile()));
+  }
+
   Item *item = get(parent);
 
-  emit drop(path, item->isFolder ? parent : parent.parent());
+  // One signal for the whole drop, not one per item: the receiver asks about
+  // the transfer once and then runs it for each of them.
+  emit drop(paths, item->isFolder ? parent : parent.parent());
 
   return false;
 }
@@ -549,7 +566,7 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
 
   ls->start(GetRclone(),
             QStringList() << "lsjson" << GetRcloneConf()
-                          << GetDriveSharedWithMe() << GetShowHidden()
+                          << driveSharedWithMeArgs() << GetShowHidden()
                           << GetDefaultRcloneOptionsList()
                           << mRemote + ":" + parent->path.path(),
             QIODevice::ReadOnly);

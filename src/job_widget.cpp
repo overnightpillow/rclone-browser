@@ -1,42 +1,16 @@
 #include "job_widget.h"
+#include "parsing.h"
 #include "utils.h"
 
 namespace {
-// Qt6 removed QRegExp. QRegularExpression has no exactMatch(), so patterns are
-// wrapped in anchoredPattern() to keep the whole-string matching the parsing
-// below depends on.
-//
-// These are file-scope because they were previously constructed inside the
-// readyRead handler, recompiling eleven patterns on every chunk of rclone
-// output.
-QRegularExpression anchored(const QString &pattern) {
-  return QRegularExpression(QRegularExpression::anchoredPattern(pattern));
+// A file name long enough to push the progress bar off the panel is elided in
+// the middle, where a path is least informative.
+QString elideName(const QString &name) {
+  if (name.length() <= 47) {
+    return name;
+  }
+  return name.left(25) + "..." + name.right(19);
 }
-
-// Until rclone 1.42
-const QRegularExpression rxSize(
-    anchored(R"(Transferred:\s+(\S+ \S+) \(([^)]+)\))"));
-// Starting with rclone 1.43
-const QRegularExpression rxSize2(anchored(
-    R"(Transferred:\s+([0-9.]+)(\S)? \/ (\S+) (\S+), ([0-9%-]+), (\S+ \S+), (\S+) (\S+))"));
-const QRegularExpression rxErrors(anchored(R"(Errors:\s+(\S+))"));
-// Until rclone 1.42
-const QRegularExpression rxChecks(anchored(R"(Checks:\s+(\S+))"));
-// Starting with rclone 1.43
-const QRegularExpression rxChecks2(
-    anchored(R"(Checks:\s+(\S+) \/ (\S+), ([0-9%-]+))"));
-// Until rclone 1.42
-const QRegularExpression rxTransferred(anchored(R"(Transferred:\s+(\S+))"));
-// Starting with rclone 1.43
-const QRegularExpression rxTransferred2(
-    anchored(R"(Transferred:\s+(\S+) \/ (\S+), ([0-9%-]+))"));
-const QRegularExpression rxTime(anchored(R"(Elapsed time:\s+(\S+))"));
-// Until rclone 1.38
-const QRegularExpression rxProgress(
-    anchored(R"(\*([^:]+):\s*([^%]+)% done.+(ETA: [^)]+))"));
-// Starting with rclone 1.39
-const QRegularExpression rxProgress2(anchored(
-    R"(\*([^:]+):\s*([^%]+)% \/[a-zA-Z0-9.]+, [a-zA-Z0-9.]+\/s, (\w+))"));
 } // namespace
 
 JobWidget::JobWidget(QProcess *process, const QString &info,
@@ -57,6 +31,10 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   ui.output->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
   ui.output->setVisible(false);
+  // Bounded, but by dropping the oldest line rather than by emptying the whole
+  // log every ten thousand lines -- which is what it did before, so a long
+  // job's output vanished exactly when someone went looking for it.
+  ui.output->setMaximumBlockCount(10000);
 
   QObject::connect(
       ui.showDetails, &QToolButton::toggled, this, [=](bool checked) {
@@ -92,16 +70,12 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   QObject::connect(ui.copy, &QToolButton::clicked, this, [=]() {
     QClipboard *clipboard = QGuiApplication::clipboard();
-    clipboard->setText(mArgs.join(" "));
+    clipboard->setText(BuildCommandLine(mArgs));
   });
 
   QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
     while (mProcess->canReadLine()) {
       QString line = mProcess->readLine().trimmed();
-      if (++mLines == 10000) {
-        ui.output->clear();
-        mLines = 1;
-      }
       ui.output->appendPlainText(line);
 
       if (line.isEmpty()) {
@@ -122,41 +96,52 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
         continue;
       }
 
-      QRegularExpressionMatch m;
+      const RcloneStats stats = ParseRcloneStats(line);
 
-      if ((m = rxSize.match(line)).hasMatch()) {
-        ui.size->setText(m.captured(1));
-        ui.bandwidth->setText(m.captured(2));
-      } else if ((m = rxSize2.match(line)).hasMatch()) {
-        ui.size->setText(m.captured(1) + " " + m.captured(2) + "B" + ", " +
-                         m.captured(5));
-        ui.bandwidth->setText(m.captured(6));
-        ui.eta->setText(m.captured(8));
-        ui.totalsize->setText(m.captured(3) + " " + m.captured(4));
-      } else if ((m = rxErrors.match(line)).hasMatch()) {
-        ui.errors->setText(m.captured(1));
-      } else if ((m = rxChecks.match(line)).hasMatch()) {
-        ui.checks->setText(m.captured(1));
-      } else if ((m = rxChecks2.match(line)).hasMatch()) {
-        ui.checks->setText(m.captured(1) + " / " + m.captured(2) + ", " +
-                           m.captured(3));
-      } else if ((m = rxTransferred.match(line)).hasMatch()) {
-        ui.transferred->setText(m.captured(1));
-      } else if ((m = rxTransferred2.match(line)).hasMatch()) {
-        ui.transferred->setText(m.captured(1) + " / " + m.captured(2) + ", " +
-                                m.captured(3));
-      } else if ((m = rxTime.match(line)).hasMatch()) {
-        ui.elapsed->setText(m.captured(1));
-      } else if ((m = rxProgress.match(line)).hasMatch()) {
-        QString name = m.captured(1).trimmed();
+      switch (stats.kind) {
+      case RcloneStats::Unknown:
+        break;
 
-        auto it = mActive.find(name);
+      case RcloneStats::Totals:
+        // Before 1.43 rclone reported only a running total and a rate, so the
+        // remaining fields keep whatever they last held rather than blinking
+        // empty.
+        ui.size->setText(stats.percent.isEmpty()
+                             ? stats.size
+                             : stats.size + ", " + stats.percent);
+        ui.bandwidth->setText(stats.bandwidth);
+        if (!stats.totalSize.isEmpty()) {
+          ui.totalsize->setText(stats.totalSize);
+        }
+        if (!stats.eta.isEmpty()) {
+          ui.eta->setText(stats.eta);
+        }
+        break;
+
+      case RcloneStats::Errors:
+        ui.errors->setText(stats.text);
+        break;
+
+      case RcloneStats::Checks:
+        ui.checks->setText(stats.text);
+        break;
+
+      case RcloneStats::FileCount:
+        ui.transferred->setText(stats.text);
+        break;
+
+      case RcloneStats::Elapsed:
+        ui.elapsed->setText(stats.text);
+        break;
+
+      case RcloneStats::FileProgress: {
+        auto it = mActive.find(stats.name);
 
         QLabel *label;
         QProgressBar *bar;
         if (it == mActive.end()) {
           label = new QLabel();
-          label->setText(name);
+          label->setText(elideName(stats.name));
 
           bar = new QProgressBar();
           bar->setMinimum(0);
@@ -167,56 +152,19 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
           ui.progress->addRow(label, bar);
 
-          mActive.insert(name, label);
+          mActive.insert(stats.name, label);
         } else {
           label = it.value();
           bar = static_cast<QProgressBar *>(label->buddy());
         }
 
-        bar->setValue(m.captured(2).toInt());
-        bar->setToolTip(m.captured(3));
+        bar->setValue(stats.filePercent);
+        bar->setToolTip("File name: " + stats.name + "\nFile stats: " +
+                        stats.fileDetail);
 
         mUpdated.insert(label);
-      } else if ((m = rxProgress2.match(line)).hasMatch()) {
-        QString name = m.captured(1).trimmed();
-
-        auto it = mActive.find(name);
-
-        QLabel *label;
-        QProgressBar *bar;
-        if (it == mActive.end()) {
-          label = new QLabel();
-
-          QString nameTrimmed;
-
-          if (name.length() > 47) {
-            nameTrimmed = name.left(25) + "..." + name.right(19);
-          } else {
-            nameTrimmed = name;
-          }
-
-          label->setText(nameTrimmed);
-
-          bar = new QProgressBar();
-          bar->setMinimum(0);
-          bar->setMaximum(100);
-          bar->setTextVisible(true);
-
-          label->setBuddy(bar);
-
-          ui.progress->addRow(label, bar);
-
-          mActive.insert(name, label);
-        } else {
-          label = it.value();
-          bar = static_cast<QProgressBar *>(label->buddy());
-        }
-
-        bar->setValue(m.captured(2).toInt());
-        bar->setToolTip("File name: " + name + "\nFile stats" +
-                        m.captured(0).mid(m.captured(0).indexOf(QLatin1Char(':'))));
-
-        mUpdated.insert(label);
+        break;
+      }
       }
     }
   });
@@ -246,6 +194,13 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
                      ui.cancel->setToolTip("Close");
 
                      emit finished(ui.info->text());
+
+                     // A cancelled job closes its row once the process is
+                     // actually gone, which is what makes cancel() able to
+                     // return immediately without leaving the row behind.
+                     if (mCancelled) {
+                       emit closed();
+                     }
                    });
 
   ui.showDetails->setStyleSheet("QToolButton { border: 0; color: green; }");
@@ -261,8 +216,25 @@ void JobWidget::cancel() {
     return;
   }
 
-  mProcess->kill();
-  mProcess->waitForFinished();
+  mCancelled = true;
+  ui.showDetails->setStyleSheet("QToolButton { border: 0; color: red; }");
+  ui.showDetails->setText("Cancelling");
 
-  emit closed();
+  // SIGTERM, not SIGKILL: rclone closes its connections, finishes writing the
+  // chunk it is on and removes partial files on the way out. Killed outright
+  // it leaves all three undone, and a killed mount leaves the mount point
+  // behind. Windows has no SIGTERM, so terminate() there asks the process to
+  // close its windows, which a console process ignores -- the timer below is
+  // what actually stops it.
+  mProcess->terminate();
+
+  // Nothing waits on that: a blocking wait here froze the whole window for as
+  // long as rclone took to notice. The row stays, showing "Cancelling", until
+  // the finished handler closes it.
+  QProcess *process = mProcess;
+  QTimer::singleShot(5000, process, [process]() {
+    if (process->state() != QProcess::NotRunning) {
+      process->kill();
+    }
+  });
 }

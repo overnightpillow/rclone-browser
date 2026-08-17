@@ -303,6 +303,17 @@ MainWindow::MainWindow() {
                    &ListOfJobOptions::tasksListUpdated, this,
                    &MainWindow::listTasks);
 
+  // Reading the saved tasks happens on that first getInstance(), before this
+  // window can show anything, so a failure is reported once the event loop is
+  // running rather than swallowed.
+  const QString taskRestoreError =
+      ListOfJobOptions::getInstance()->takeRestoreError();
+  if (!taskRestoreError.isEmpty()) {
+    QTimer::singleShot(0, this, [this, taskRestoreError]() {
+      QMessageBox::warning(this, "Saved tasks", taskRestoreError);
+    });
+  }
+
   QStyle *style = QApplication::style();
   ui.buttonDeleteTask->setIcon(style->standardIcon(QStyle::SP_TrashIcon));
   ui.buttonEditTask->setIcon(style->standardIcon(QStyle::SP_FileIcon));
@@ -758,33 +769,62 @@ void MainWindow::rcloneConfig() {
   p->setProgram("open");
   p->setArguments(QStringList() << tmp->fileName());
 #else
+  // Which flag introduces the command to run differs by terminal, and
+  // gnome-terminal -- the first one the old nested search reached -- dropped
+  // -e in 3.38, so the Config button did nothing at all on a current GNOME
+  // desktop. The flag belongs with the terminal, not hard-coded after it.
+  struct Terminal {
+    const char *executable;
+    // The flag after which the rest of the arguments are the command to run.
+    const char *runFlag;
+  };
+  static const Terminal terminals[] = {
+      {"x-terminal-emulator", "-e"}, // Debian's alternatives symlink
+      {"gnome-terminal", "--"},
+      {"konsole", "-e"},
+      {"xfce4-terminal", "-x"},
+      {"mate-terminal", "-x"},
+      {"kitty", "--"},
+      {"alacritty", "-e"},
+      {"foot", "--"},
+      {"wezterm", "start"},
+      {"lxterminal", "-e"},
+      {"urxvt", "-e"},
+      {"st", "-e"},
+      {"xterm", "-e"},
+  };
+
   QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   QString terminal = env.value("TERMINAL");
+  // No table entry to take a flag from for the user's own override, so keep
+  // the -e this has always used.
+  QString runFlag = "-e";
+
   if (terminal.isEmpty()) {
-    terminal = QStandardPaths::findExecutable("gnome-terminal");
-    if (terminal.isEmpty()) {
-      terminal = QStandardPaths::findExecutable("xfce4-terminal");
-      if (terminal.isEmpty()) {
-        terminal = QStandardPaths::findExecutable("xterm");
-        if (terminal.isEmpty()) {
-          terminal = QStandardPaths::findExecutable("x-terminal-emulator");
-          if (terminal.isEmpty()) {
-            terminal = QStandardPaths::findExecutable("konsole");
-            if (terminal.isEmpty()) {
-              QMessageBox::critical(this, "Error",
-                                    "Not sure how to launch terminal!\n"
-                                    "Please set path to terminal executable in "
-                                    "$TERMINAL environment variable.",
-                                    QMessageBox::Ok);
-              return;
-            }
-          }
-        }
+    for (const Terminal &candidate : terminals) {
+      terminal = QStandardPaths::findExecutable(candidate.executable);
+      if (!terminal.isEmpty()) {
+        runFlag = candidate.runFlag;
+        break;
       }
     }
   }
 
-  p->setArguments(QStringList() << "-e" << terminalRcloneCmd);
+  if (terminal.isEmpty()) {
+    QMessageBox::critical(this, "Error",
+                          "Not sure how to launch terminal!\n"
+                          "Please set path to terminal executable in "
+                          "$TERMINAL environment variable.",
+                          QMessageBox::Ok);
+    return;
+  }
+
+  // The command is handed to a shell rather than to the terminal directly:
+  // terminalRcloneCmd is a shell command line, quotes and all, and the
+  // terminals that take the rest of argv would otherwise look for a program
+  // named after the whole string.
+  p->setArguments(QStringList() << runFlag << "sh"
+                                << "-c" << terminalRcloneCmd);
   p->setProgram(terminal);
 #endif
 
@@ -1228,8 +1268,17 @@ bool MainWindow::canClose() {
   }
 
   if (button == QMessageBox::Yes) {
+    // Collected first: cancelling a job can close its row, which removes
+    // widgets from this very layout, and indices shifted underneath the loop
+    // so some jobs were skipped and never asked to stop.
+    QVector<QWidget *> widgets;
     for (int i = 0; i < ui.jobs->count(); i++) {
-      QWidget *widget = ui.jobs->itemAt(i)->widget();
+      if (QWidget *widget = ui.jobs->itemAt(i)->widget()) {
+        widgets.append(widget);
+      }
+    }
+
+    for (QWidget *widget : widgets) {
       if (auto mount = qobject_cast<MountWidget *>(widget)) {
         mount->cancel();
       } else if (auto transfer = qobject_cast<JobWidget *>(widget)) {
@@ -1358,7 +1407,8 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
   transfer->start(GetRclone(), GetRcloneConf() + args, QIODevice::ReadOnly);
 }
 
-void MainWindow::addMount(const QString &remote, const QString &folder) {
+void MainWindow::addMount(const QString &remote, const QString &folder,
+                          bool driveShared) {
   QProcess *mount = new QProcess(this);
   mount->setProcessChannelMode(QProcess::MergedChannels);
 
@@ -1396,7 +1446,6 @@ void MainWindow::addMount(const QString &remote, const QString &folder) {
 
   auto settings = GetSettings();
   QString opt = settings->value("Settings/mount").toString();
-  bool driveShared = settings->value("Settings/driveShared").toBool();
 
   QStringList args;
   args << "mount";
@@ -1437,8 +1486,11 @@ void MainWindow::addMount(const QString &remote, const QString &folder) {
 }
 
 void MainWindow::addStream(const QString &remote, const QString &stream) {
-  auto player = new QProcess();
-  auto rclone = new QProcess();
+  // Parented, like the transfer and mount processes: unparented, neither was
+  // ever freed if it outlived its widget, and Qt could not clean them up on
+  // exit either.
+  auto player = new QProcess(this);
+  auto rclone = new QProcess(this);
   rclone->setStandardOutputProcess(player);
 
   QObject::connect(

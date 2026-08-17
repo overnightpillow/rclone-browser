@@ -55,6 +55,15 @@ public:
   bool isTopLevel(const QModelIndex &index) const;
   bool isFolder(const QModelIndex &index) const;
 
+  // Google Drive's "shared with me" view. Held per model, so two Drive tabs
+  // can be listing different views at once; it used to come from a QSettings
+  // key shared by every tab in the window.
+  void setDriveSharedWithMe(bool shared) { mDriveSharedWithMe = shared; }
+  QStringList driveSharedWithMeArgs() const {
+    return mDriveSharedWithMe ? QStringList{"--drive-shared-with-me"}
+                              : QStringList();
+  }
+
   QModelIndex addRoot(const QString &name, const QString &path);
 
   QModelIndex index(int row, int column,
@@ -79,12 +88,14 @@ public:
 
 signals:
   void getIcon(Item *item, const QPersistentModelIndex &index);
-  void drop(const QDir &path, const QModelIndex &parent);
+  void drop(const QList<QDir> &paths, const QModelIndex &parent);
 
 private:
   Item *mRoot;
 
   QString mRemote;
+
+  bool mDriveSharedWithMe = false;
 
   QHash<QString, QIcon> mLoadedIcons;
 

@@ -55,4 +55,5 @@ endfunction()
 
 rrm_add_test(test_formatting)
 rrm_add_test(test_parsing)
+rrm_add_test(test_tasks)
 rrm_add_test(test_widgets)

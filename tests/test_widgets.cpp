@@ -1,5 +1,6 @@
 #include "icon_cache.h"
 #include "item_model.h"
+#include "job_widget.h"
 #include "remote_widget.h"
 #include "restic.h"
 #include "restic_widget.h"
@@ -33,6 +34,9 @@ private slots:
   void remoteWidgetSurvivesRepeatedSelection();
   void remoteWidgetSurvivesDestruction();
   void remoteWidgetGoogleVariantConstructs();
+  void remoteWidgetAcceptsMultipleDroppedFiles();
+
+  void jobWidgetShowsStatsFromRcloneOutput();
 
   void resticWidgetConstructs();
   void resticWidgetSurvivesDestruction();
@@ -152,6 +156,117 @@ void TestWidgets::remoteWidgetGoogleVariantConstructs() {
   QVERIFY(shared->parent() != nullptr);
 
   delete widget;
+}
+
+void TestWidgets::remoteWidgetAcceptsMultipleDroppedFiles() {
+  // Dropping more than one file was refused outright: canDropMimeData only
+  // accepted a drop of exactly one URL, and dropMimeData read only the first.
+  //
+  // The model is built directly rather than through a RemoteWidget: the
+  // widget answers this signal with a modal transfer dialog, which in a test
+  // would simply never close.
+  ItemModel model(mIcons, "test-remote", nullptr);
+  const QModelIndex root = model.addRoot("test-remote:", QString());
+  QVERIFY(root.isValid());
+
+  QTemporaryDir dir;
+  QVERIFY(dir.isValid());
+  QList<QUrl> urls;
+  for (const QString &name : {"one.txt", "two.txt", "three.txt"}) {
+    const QString path = QDir(dir.path()).filePath(name);
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    file.write("x");
+    file.close();
+    urls.append(QUrl::fromLocalFile(path));
+  }
+
+  QMimeData single;
+  single.setUrls({urls.first()});
+  QVERIFY(model.canDropMimeData(&single, Qt::CopyAction, -1, -1, root));
+
+  QMimeData several;
+  several.setUrls(urls);
+  QVERIFY(model.canDropMimeData(&several, Qt::CopyAction, -1, -1, root));
+
+  // A drag from a browser is not something rclone can upload from disk.
+  QMimeData notLocal;
+  notLocal.setUrls({QUrl("https://example.com/file.txt")});
+  QVERIFY(!model.canDropMimeData(&notLocal, Qt::CopyAction, -1, -1, root));
+
+  // One signal for the drop, carrying every item -- not one item, and not
+  // three separate dialogs.
+  int emissions = 0;
+  QList<QDir> dropped;
+  QObject::connect(&model, &ItemModel::drop, &model,
+                   [&](const QList<QDir> &paths, const QModelIndex &) {
+                     emissions++;
+                     dropped = paths;
+                   });
+
+  model.dropMimeData(&several, Qt::CopyAction, -1, -1, root);
+
+  QCOMPARE(emissions, 1);
+  QCOMPARE(dropped.size(), 3);
+}
+
+void TestWidgets::jobWidgetShowsStatsFromRcloneOutput() {
+  // The end of the wiring that test_parsing covers from the other end: real
+  // rclone 1.71 output arriving on a process, and the Jobs panel's fields
+  // actually filling in. Every one of these was blank for the whole life of
+  // the 1.56 output format.
+  auto *process = new QProcess();
+  process->setProcessChannelMode(QProcess::MergedChannels);
+
+  JobWidget widget(process, "Copy", QStringList() << "copy", "src", "dest");
+
+  // A shell standing in for rclone: one captured stats block, then a wait, so
+  // that the job is still running while the panel is inspected. The per-file
+  // rows are cleared when the process exits, as they are for a real job.
+  process->start("/bin/sh",
+                 {"-c",
+                  "printf '%s\\n' "
+                  "'Transferred:   \t    3.027 MiB / 120 MiB, 3%, 3.027 MiB/s, "
+                  "ETA 38s' "
+                  "'Errors:                 1 (retrying may help)' "
+                  "'Checks:                 0 / 0, -, Listed 1' "
+                  "'Transferred:            0 / 1, 0%' "
+                  "'Elapsed time:         1.9s' "
+                  "' *                                       big.bin:  3% "
+                  "/120Mi, 2.027Mi/s, 57s'; sleep 30"});
+  QVERIFY(process->waitForStarted());
+
+  auto field = [&widget](const char *name) {
+    auto *edit = widget.findChild<QLineEdit *>(name);
+    return edit ? edit->text() : QString("<missing>");
+  };
+
+  QTRY_COMPARE(field("size"), QString("3.027 MiB, 3%"));
+  QCOMPARE(field("totalsize"), QString("120 MiB"));
+  QCOMPARE(field("bandwidth"), QString("3.027 MiB/s"));
+  QCOMPARE(field("eta"), QString("38s"));
+  QCOMPARE(field("errors"), QString("1"));
+  QCOMPARE(field("checks"), QString("0 / 0, -"));
+  QCOMPARE(field("transferred"), QString("0 / 1, 0%"));
+  QCOMPARE(field("elapsed"), QString("1.9s"));
+
+  // The per-file line adds a progress bar for that file. The old pattern
+  // rejected the "0/s, -" that rclone prints before it has a rate, so a bar
+  // appeared only once the transfer was properly under way.
+  QTRY_VERIFY(widget.findChild<QProgressBar *>() != nullptr);
+  QCOMPARE(widget.findChild<QProgressBar *>()->value(), 3);
+
+  // Cancelling asks the process to stop and returns immediately: it used to
+  // kill outright and then block the GUI on waitForFinished().
+  //
+  // Guarded, because the widget deletes the process once it exits, and the
+  // event loop this waits on is what delivers that deletion.
+  QPointer<QProcess> running(process);
+  widget.cancel();
+  QTRY_VERIFY_WITH_TIMEOUT(
+      !running || running->state() == QProcess::NotRunning, 6000);
+
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
 void TestWidgets::resticWidgetConstructs() {

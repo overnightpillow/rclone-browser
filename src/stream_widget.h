@@ -22,6 +22,7 @@ private:
   Ui::StreamWidget ui;
 
   bool mRunning = true;
+  bool mCancelled = false;
   QProcess *mRclone;
   QProcess *mPlayer;
 };

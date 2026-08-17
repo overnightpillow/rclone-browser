@@ -5,9 +5,9 @@
 TransferDialog::TransferDialog(bool isDownload, bool isDrop,
                                const QString &remote, const QDir &path,
                                bool isFolder, QWidget *parent, JobOptions *task,
-                               bool editMode)
+                               bool editMode, bool driveShared)
     : QDialog(parent), mIsDownload(isDownload), mIsFolder(isFolder),
-      mIsEditMode(editMode), mJobOptions(task) {
+      mIsEditMode(editMode), mDriveShared(driveShared), mJobOptions(task) {
   ui.setupUi(this);
   resize(0, 0);
   setWindowTitle(isDownload ? "Download" : "Upload");
@@ -200,8 +200,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
   // would be nice to display it only for Google Drive - todo
   ui.checkisDriveSharedWithMe->setDisabled(true);
 
-  ui.checkisDriveSharedWithMe->setChecked(
-      settings->value("Settings/driveShared", false).toBool());
+  ui.checkisDriveSharedWithMe->setChecked(mDriveShared);
   // always clear for new jobs
   ui.textDescription->clear();
 
@@ -310,6 +309,34 @@ TransferDialog::~TransferDialog() {
 
 void TransferDialog::setSource(const QString &path) {
   ui.textSource->setText(QDir::toNativeSeparators(path));
+}
+
+void TransferDialog::setSources(const QStringList &paths) {
+  if (paths.size() <= 1) {
+    setSource(paths.isEmpty() ? QString() : paths.first());
+    return;
+  }
+
+  // Several items were dropped at once. One line edit cannot hold them, and
+  // editing "4 items" into something else would mean nothing, so the field
+  // reports what is going to be transferred and stops being an input.
+  QStringList names;
+  names.reserve(paths.size());
+  for (const QString &path : paths) {
+    names.append(QFileInfo(path).fileName());
+  }
+
+  ui.textSource->setText(QString("%1 items: %2")
+                             .arg(paths.size())
+                             .arg(names.join(", ")));
+  ui.textSource->setReadOnly(true);
+  ui.textSource->setCursorPosition(0);
+  ui.textSource->setToolTip(paths.join('\n'));
+
+  // The browse buttons would replace the whole list with one path.
+  ui.buttonSourceFile->setVisible(false);
+  ui.buttonSourceFolder->setVisible(false);
+  ui.buttonDefaultSource->setVisible(false);
 }
 
 QString TransferDialog::getMode() const {
@@ -424,17 +451,11 @@ JobOptions *TransferDialog::getJobOptions() {
   mJobOptions->isFolder = mIsFolder;
 
   mJobOptions->description = ui.textDescription->text();
-  //   auto settings = GetSettings();
-  //   mJobOptions->DriveSharedWithMe = settings->value("Settings/driveShared",
-  //   false).toBool();
 
-  if (mIsEditMode)
-    mJobOptions->DriveSharedWithMe = ui.checkisDriveSharedWithMe->isChecked();
-  else {
-    auto settings = GetSettings();
-    mJobOptions->DriveSharedWithMe =
-        settings->value("Settings/driveShared", false).toBool();
-  };
+  // Editing a saved task keeps what the task was saved with; a new one takes
+  // the state of the tab it was started from, passed in at construction.
+  mJobOptions->DriveSharedWithMe =
+      mIsEditMode ? ui.checkisDriveSharedWithMe->isChecked() : mDriveShared;
 
   return mJobOptions;
 }

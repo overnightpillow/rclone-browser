@@ -14,6 +14,8 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
 
   ui.output->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
   ui.output->setVisible(false);
+  // A mount can log for days, and nothing trimmed this at all before.
+  ui.output->setMaximumBlockCount(10000);
 
   QObject::connect(
       ui.showDetails, &QToolButton::toggled, this, [=](bool checked) {
@@ -70,6 +72,13 @@ MountWidget::MountWidget(QProcess *process, const QString &remote,
                      }
                      ui.cancel->setToolTip("Close");
                      emit finished();
+
+                     // Unmounting is asynchronous: the row closes when rclone
+                     // has actually let go of the mount point, not when the
+                     // unmount command was merely started.
+                     if (mCancelled) {
+                       emit closed();
+                     }
                    });
 
   ui.showDetails->setStyleSheet("QToolButton { border: 0; color: green; }");
@@ -83,13 +92,17 @@ void MountWidget::cancel() {
     return;
   }
 
-  QString cmd;
+  mCancelled = true;
+  ui.showDetails->setStyleSheet("QToolButton { border: 0; color: red; }");
+  ui.showDetails->setText("Unmounting");
 
 #if defined(Q_OS_MACOS) || defined(Q_OS_FREEBSD)
   QProcess::startDetached("umount", QStringList() << ui.folder->text());
 #else
 #if defined(Q_OS_WIN32)
-  QProcess *p = new QProcess();
+  // Parented, so the object is freed with the widget rather than leaked on
+  // every unmount.
+  QProcess *p = new QProcess(this);
   QStringList args;
   args << "rc";
   // requires rlone version at least 1.50
@@ -111,7 +124,19 @@ void MountWidget::cancel() {
 #endif
 #endif
 
-  mProcess->waitForFinished();
-
-  emit closed();
+  // The old code blocked here on waitForFinished(), so an unmount that could
+  // not complete -- a file still open on the mount point is enough -- froze the
+  // window with no way to tell what was happening. If rclone has not exited
+  // ten seconds after the unmount was requested, escalate rather than wait.
+  QProcess *process = mProcess;
+  QTimer::singleShot(10000, process, [process]() {
+    if (process->state() != QProcess::NotRunning) {
+      process->terminate();
+      QTimer::singleShot(5000, process, [process]() {
+        if (process->state() != QProcess::NotRunning) {
+          process->kill();
+        }
+      });
+    }
+  });
 }

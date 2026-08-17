@@ -188,8 +188,26 @@ int main(int argc, char *argv[]) {
 
   // qDebug() << QString("main.cpp tmpDir:  " + tmpDir);
 
-  // not most elegant as fixed name but in reality not big deal
-  QLockFile lockFile(tmpDir + "/.RcloneBrowser_4q6RgLs2RpbJA.lock");
+  // The single-instance lock has to be per user, not per machine. Its
+  // directory used to be QDir::tempPath() with a fixed file name, which is
+  // per user on macOS and Windows but /tmp on Linux -- so the second person
+  // logged into the same machine was told the application was already
+  // running, by a lock they could neither see nor remove.
+  //
+  // The runtime directory (/run/user/<uid> on Linux) is per user and mode
+  // 0700; where Qt has no such location, the temporary directory it falls
+  // back to is already private. In portable mode the lock stays beside the
+  // configuration, since that install is one user's by definition.
+  QString lockDir = tmpDir;
+  if (!IsPortableMode()) {
+    const QString runtimeDir =
+        QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
+    if (!runtimeDir.isEmpty() && QDir(runtimeDir).exists()) {
+      lockDir = runtimeDir;
+    }
+  }
+
+  QLockFile lockFile(QDir(lockDir).absoluteFilePath(".rclone-browser.lock"));
 
   if (!lockFile.tryLock(100)) {
     // if already running display warning and quit

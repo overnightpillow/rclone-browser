@@ -21,6 +21,7 @@ private slots:
   void versionWithNonNumericComponent();
   void resticRepoForRemote();
   void shellQuoting();
+  void commandLineQuoting();
 
   void themeAdaptsToPalette();
   void themeHasNoHardcodedColours();
@@ -154,6 +155,42 @@ void TestFormatting::shellQuoting() {
           quoted.contains(R"('\'')"));
 
   QCOMPARE(ShellQuote(QString()), QString("''"));
+}
+
+void TestFormatting::commandLineQuoting() {
+  // The Jobs tab's copy button produced this by joining argv on spaces, so any
+  // path with a space in it -- "/Users/kevin/My Files" -- came out as a
+  // command that could not be pasted back into a shell.
+  const QStringList args = {"/usr/local/bin/rclone", "copy",
+                            "/Users/kevin/My Files", "b2:backup"};
+
+  const QString line = BuildCommandLine(args);
+
+  // Ordinary arguments are left alone: a command full of quotes is harder to
+  // read, and reading it is the whole point of copying it.
+  QVERIFY(line.startsWith("/usr/local/bin/rclone copy "));
+  QVERIFY(!line.contains("'/usr/local/bin/rclone'"));
+
+#if !defined(Q_OS_WIN)
+  QCOMPARE(line, QString("/usr/local/bin/rclone copy '/Users/kevin/My Files' "
+                         "b2:backup"));
+
+  // Characters the shell would act on, quoted rather than escaped in place.
+  QCOMPARE(BuildCommandLine({"--exclude", "*.tmp"}),
+           QString("--exclude '*.tmp'"));
+  QCOMPARE(BuildCommandLine({"echo", "it's"}), QString(R"(echo 'it'\''s')"));
+  QCOMPARE(BuildCommandLine({"--header", "X: $HOME"}),
+           QString("--header 'X: $HOME'"));
+
+  // An empty argument has to survive as an empty argument, not vanish.
+  QCOMPARE(BuildCommandLine({"rclone", ""}), QString("rclone ''"));
+#endif
+
+  // Flags and remote:path arguments are safe as they stand.
+  QCOMPARE(BuildCommandLine({"--config", "/home/kevin/.config/rclone.conf"}),
+           QString("--config /home/kevin/.config/rclone.conf"));
+  QCOMPARE(BuildCommandLine({"b2:bucket/sub-dir_1"}),
+           QString("b2:bucket/sub-dir_1"));
 }
 
 void TestFormatting::themeAdaptsToPalette() {

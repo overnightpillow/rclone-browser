@@ -25,8 +25,8 @@ private:
   Ui::JobWidget ui;
 
   bool mRunning = true;
+  bool mCancelled = false;
   QProcess *mProcess;
-  int mLines = 0;
 
   QStringList mArgs;
   QHash<QString, QLabel *> mActive;

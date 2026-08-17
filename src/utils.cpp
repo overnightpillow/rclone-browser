@@ -286,27 +286,59 @@ void StyleToolBar(QToolBar *toolBar) {
   toolBar->setIconSize(QSize(16, 16));
 }
 
-QStringList GetDriveSharedWithMe() {
-  auto settings = GetSettings();
-  bool driveShared = settings->value("Settings/driveShared", false).toBool();
-  QStringList driveSharedOption;
-  if (driveShared) {
-    driveSharedOption << "--drive-shared-with-me";
-  }
-  return driveSharedOption;
-}
-
 QStringList GetDefaultRcloneOptionsList() {
   auto settings = GetSettings();
   QString defaultRcloneOptions =
       settings->value("Settings/defaultRcloneOptions").toString();
   QStringList defaultRcloneOptionsList;
   if (!defaultRcloneOptions.isEmpty()) {
-    for (auto arg : defaultRcloneOptions.split(' ')) {
-      defaultRcloneOptionsList << arg;
+    // Blank entries would reach rclone as empty arguments; a settings field
+    // with a stray double space is enough to produce them.
+    for (const QString &arg : defaultRcloneOptions.split(' ')) {
+      if (!arg.trimmed().isEmpty()) {
+        defaultRcloneOptionsList << arg;
+      }
     }
   }
   return defaultRcloneOptionsList;
+}
+
+QString BuildCommandLine(const QStringList &args) {
+  // Joining on spaces was enough to break every copied command that touched a
+  // path with a space in it -- which, on macOS and Windows, is most of them.
+  //
+  // The quoting is the destination shell's, not rclone's: this string exists
+  // to be pasted into a terminal. Anything outside the safe set is quoted
+  // whole rather than escaped character by character, which keeps the result
+  // readable and correct for the awkward cases (spaces, quotes, globs, $).
+  static const QRegularExpression safe(R"(^[A-Za-z0-9_@%+=:,./-]+$)");
+
+  QStringList quoted;
+  quoted.reserve(args.size());
+
+  for (const QString &arg : args) {
+    if (!arg.isEmpty() && safe.match(arg).hasMatch()) {
+      quoted << arg;
+      continue;
+    }
+
+#if defined(Q_OS_WIN)
+    // cmd.exe and PowerShell both take double quotes; a literal double quote
+    // inside is escaped with a backslash, which both accept for a program
+    // argument.
+    QString escaped = arg;
+    escaped.replace("\"", "\\\"");
+    quoted << "\"" + escaped + "\"";
+#else
+    // Single quotes protect everything except a single quote itself, which is
+    // closed, escaped and reopened: it's  ->  'it'\''s'
+    QString escaped = arg;
+    escaped.replace("'", R"('\'')");
+    quoted << "'" + escaped + "'";
+#endif
+  }
+
+  return quoted.join(' ');
 }
 
 QStringList GetShowHidden() {

@@ -16,7 +16,10 @@ public:
 signals:
   void addTransfer(const QString &message, const QString &source,
                    const QString &remote, const QStringList &args);
-  void addMount(const QString &remote, const QString &folder);
+  // driveShared travels with the request rather than through a settings key:
+  // the mount has to use the same view of the remote as the tab it was
+  // started from, whatever the other tabs are showing.
+  void addMount(const QString &remote, const QString &folder, bool driveShared);
   void addStream(const QString &remote, const QString &stream);
 
   // A folder in the tree may itself be a restic repository. MainWindow owns
@@ -27,4 +30,8 @@ signals:
 
 private:
   Ui::RemoteWidget ui;
+
+  // "--drive-shared-with-me" when this tab's check box is ticked, empty
+  // otherwise. Every rclone command this widget runs takes it from here.
+  QStringList driveSharedArgs() const;
 };

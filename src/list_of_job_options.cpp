@@ -51,7 +51,7 @@ bool ListOfJobOptions::Forget(JobOptions *jo) {
   return isKnown;
 }
 
-QFile *ListOfJobOptions::GetPersistenceFile(QIODevice::OpenModeFlag mode) {
+QDir ListOfJobOptions::GetPersistenceDir() {
 
   QDir outputDir;
 
@@ -84,61 +84,124 @@ QFile *ListOfJobOptions::GetPersistenceFile(QIODevice::OpenModeFlag mode) {
   if (!outputDir.exists()) {
     outputDir.mkpath(".");
   }
-  QString filePath = outputDir.absoluteFilePath(persistenceFileName);
-  QFile *file = new QFile(filePath);
-
-  if (!file->open(mode)) {
-    //    qDebug() << QString("Could not open ") << file->fileName();
-    delete file;
-    file = nullptr;
-  }
-  return file;
+  return outputDir;
 }
 
-bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
-  QFile *file = GetPersistenceFile(QIODevice::ReadOnly);
-  if (file == nullptr)
-    return false;
-  QDataStream instream(file);
-  instream.setVersion(QDataStream::Qt_5_2);
+QString ListOfJobOptions::GetPersistenceFilePath() {
+  return GetPersistenceDir().absoluteFilePath(persistenceFileName);
+}
 
-  while (!instream.atEnd()) {
-    try {
-      JobOptions *jo = new JobOptions();
-      instream >> *jo;
-      dataIn.tasks.append(jo);
-    } catch (SerializationException &ex) {
-      //      qDebug() << QString("failed to restore tasks: ") << ex.Message;
-      file->close();
-      delete file;
-      return false;
-    }
+bool ListOfJobOptions::ReadTasks(const QString &filePath,
+                                 QList<JobOptions *> *tasks, QString *error) {
+  Q_ASSERT(tasks);
+
+  QFile file(filePath);
+  if (!file.open(QIODevice::ReadOnly)) {
+    // No file yet is the normal first-run state, not a failure worth
+    // reporting.
+    return false;
   }
 
-  file->close();
-  delete file;
+  QDataStream instream(&file);
+  instream.setVersion(QDataStream::Qt_5_2);
 
+  QList<JobOptions *> restored;
+  QString failure;
+
+  while (!instream.atEnd()) {
+    JobOptions *jo = new JobOptions();
+    try {
+      instream >> *jo;
+    } catch (SerializationException &ex) {
+      delete jo;
+      failure = ex.Message;
+      break;
+    }
+    restored.append(jo);
+  }
+
+  if (failure.isEmpty() && instream.status() != QDataStream::Ok) {
+    // A truncated file ends part way through a field rather than at a record
+    // boundary, which the exceptions above do not catch: QDataStream reports
+    // it through its status and hands back zeroed values.
+    failure = "the file ends part way through a task";
+  }
+
+  if (!failure.isEmpty()) {
+    qDeleteAll(restored);
+    if (error) {
+      *error = failure;
+    }
+    return false;
+  }
+
+  tasks->append(restored);
   return true;
 }
 
-bool ListOfJobOptions::PersistToUserData() {
-  QFile *file = GetPersistenceFile(
-      QIODevice::WriteOnly); // note this mode implies Truncate also
-  if (file == nullptr)
+bool ListOfJobOptions::WriteTasks(const QString &filePath,
+                                  const QList<JobOptions *> &tasks) {
+  // QSaveFile writes to a temporary file and renames it into place on commit,
+  // so an interrupted write leaves the previous task list intact. Opening the
+  // real file truncated it first, which meant a crash, a full disk or a power
+  // cut between that truncate and the last record lost every saved task.
+  QSaveFile file(filePath);
+  if (!file.open(QIODevice::WriteOnly)) {
     return false;
-  QDataStream outstream(file);
+  }
+
+  QDataStream outstream(&file);
   outstream.setVersion(QDataStream::Qt_5_2);
 
   for (JobOptions *it : tasks) {
     outstream << *it;
   }
 
-  file->flush();
-  file->close();
+  if (outstream.status() != QDataStream::Ok) {
+    file.cancelWriting();
+    return false;
+  }
+
+  return file.commit();
+}
+
+bool ListOfJobOptions::RestoreFromUserData(ListOfJobOptions &dataIn) {
+  const QString filePath = GetPersistenceFilePath();
+  if (!QFile::exists(filePath)) {
+    return false;
+  }
+
+  QString error;
+  if (ReadTasks(filePath, &dataIn.tasks, &error)) {
+    return true;
+  }
+  if (error.isEmpty()) {
+    return false;
+  }
+
+  // The previous code discarded every saved task here without a word, so one
+  // bad byte silently emptied the Tasks tab -- and the next save wrote that
+  // empty list back over the only copy. Keep the evidence, and say so.
+  const QString corruptPath = filePath + ".corrupt";
+  QFile::remove(corruptPath);
+  const bool kept = QFile::rename(filePath, corruptPath);
+
+  dataIn.mRestoreError =
+      QString("Saved tasks could not be read: %1.").arg(error) +
+      (kept ? QString("\n\nThe file has been kept as %1 and the task list "
+                      "starts empty.")
+                  .arg(QDir::toNativeSeparators(corruptPath))
+            : QString("\n\nThe file could not be moved aside, so it will be "
+                      "overwritten when a task is next saved."));
+  return false;
+}
+
+bool ListOfJobOptions::PersistToUserData() {
+  if (!WriteTasks(GetPersistenceFilePath(), tasks)) {
+    return false;
+  }
 
   emit tasksListUpdated();
-
-  delete file;
 
   return true;
 }
