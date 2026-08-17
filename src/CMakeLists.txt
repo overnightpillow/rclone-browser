@@ -1,4 +1,7 @@
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+# 6.4 is the floor because that is what Ubuntu 24.04 LTS ships and CI builds
+# against. Stating it here turns "too old" into a configure-time message rather
+# than a compile error inside some translation unit.
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 qt_standard_project_setup()
 

@@ -220,10 +220,15 @@ quarantined; clear it with `xattr -dr com.apple.quarantine`.
 the rclone and restic browsers have both been driven against real B2 and Storj
 remotes, in light and dark mode.
 
-**Windows and Linux are unbuilt.** The Qt6 replacement for the Windows-only
-icon path (`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) has
-never been through a Windows compiler. CI builds and tests Linux and macOS on
-every push; there is no Windows runner yet.
+**Linux builds and tests clean** on Ubuntu 24.04 — GCC 13, Qt 6.4.2, `-Werror`
+— in CI on every push, alongside macOS. The application has not been driven as
+a GUI there, so treat the interface as unproven even though the code is not.
+
+**Windows is unbuilt.** The Qt6 replacement for the Windows-only icon path
+(`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) has never been
+through a Windows compiler, and there is no Windows runner yet.
+
+Qt 6.4 is the floor, set by Ubuntu 24.04 LTS and enforced in `find_package`.
 
 ### Planned
 

@@ -1,6 +1,6 @@
 # Qt's imported targets are directory-scoped, so this directory needs its own
 # find_package for every component it links, not just Test.
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Network Test)
 
 qt_standard_project_setup()
 

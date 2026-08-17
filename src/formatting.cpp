@@ -31,8 +31,11 @@ QString FormatModTime(const QString &rfc3339) {
 
   // Rendered in a zone behind UTC the sentinel reads as "1999-12-31", which
   // looks like a decoding bug rather than missing data.
+  // QTimeZone::utc(), not the QTimeZone::UTC enumerator: the latter arrived in
+  // Qt 6.5, and the oldest Qt we build against is 6.4, which is what Ubuntu
+  // 24.04 LTS ships.
   static const QDateTime unknownBefore(QDate(2000, 1, 1), QTime(0, 0),
-                                       QTimeZone::UTC);
+                                       QTimeZone::utc());
   if (parsed.toUTC() <= unknownBefore) {
     return QString();
   }
