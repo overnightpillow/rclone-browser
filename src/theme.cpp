@@ -114,6 +114,16 @@ QTreeView::item:hover, QListWidget::item:hover {
     background: %2;
 }
 
+/* A disabled row is how a non-selectable one is expressed -- the section
+   headings in the remotes list are disabled items. The delegate paints those
+   from the palette's Disabled group and ignores whatever foreground the item
+   itself carries, and on a dark palette that group is near-black on near-black:
+   the headings were there, and could not be read. Stated here so it follows the
+   colour scheme rather than being fixed at the moment the row was built. */
+QTreeView::item:disabled, QListWidget::item:disabled {
+    color: %8;
+}
+
 /* Styling ::item at all moves Qt onto the style sheet drawing path, which
    stops painting the selection background while the text still switches to
    HighlightedText -- white on white, invisible. Both halves have to be stated

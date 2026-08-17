@@ -14,6 +14,50 @@
 #include "osx_helper.h"
 #endif
 
+namespace {
+
+// The hand-built dark palette behind the "dark mode" preference, for the
+// platforms and versions where Qt does not follow the desktop's own scheme.
+// Two identical copies of this used to sit inline in the constructor, one per
+// platform branch, which is how they came to disagree with each other.
+void ApplyLegacyDarkPalette() {
+  qApp->setStyle(QStyleFactory::create("Fusion"));
+
+  QPalette dark;
+  dark.setColor(QPalette::Window, QColor(53, 53, 53));
+  dark.setColor(QPalette::WindowText, Qt::white);
+  dark.setColor(QPalette::Base, QColor(25, 25, 25));
+  dark.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
+  dark.setColor(QPalette::Text, Qt::white);
+  dark.setColor(QPalette::Button, QColor(53, 53, 53));
+  dark.setColor(QPalette::ButtonText, Qt::white);
+  dark.setColor(QPalette::BrightText, Qt::red);
+  dark.setColor(QPalette::Link, QColor(42, 130, 218));
+  dark.setColor(QPalette::Highlight, QColor(42, 130, 218));
+  dark.setColor(QPalette::HighlightedText, Qt::black);
+
+  // Both tool tip roles were set to white, which is white text on a white
+  // tool tip.
+  dark.setColor(QPalette::ToolTipBase, QColor(53, 53, 53));
+  dark.setColor(QPalette::ToolTipText, Qt::white);
+
+  // The Disabled group was left at the default light palette, so everything
+  // drawn from it -- including the non-selectable section headings in the
+  // remotes list -- came out near-black on near-black.
+  dark.setColor(QPalette::Disabled, QPalette::WindowText, QColor(130, 130, 130));
+  dark.setColor(QPalette::Disabled, QPalette::Text, QColor(130, 130, 130));
+  dark.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(130, 130, 130));
+
+  qApp->setPalette(dark);
+
+  // Deliberately no setStyleSheet: it used to install a tool tip rule, which
+  // replaced the whole generated theme sheet installed at startup. Turning
+  // this preference on threw away every other style rule the application has.
+  // The tool tip roles above cover what it was for.
+}
+
+} // namespace
+
 MainWindow::MainWindow() {
   ui.setupUi(this);
 
@@ -29,67 +73,20 @@ MainWindow::MainWindow() {
 #endif
 
 #if !defined(Q_OS_MACOS)
-  auto settings = GetSettings();
-  bool darkMode = settings->value("Settings/darkMode").toBool();
-
-  // enable dark mode for Windows and Linux
-  if (darkMode) {
-    qApp->setStyle(QStyleFactory::create("Fusion"));
-
-    QPalette darkPalette;
-    darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::WindowText, Qt::white);
-    darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-    darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-    darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-    darkPalette.setColor(QPalette::Text, Qt::white);
-    darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-    darkPalette.setColor(QPalette::ButtonText, Qt::white);
-    darkPalette.setColor(QPalette::BrightText, Qt::red);
-    darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-
-    darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-    darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-
-    qApp->setPalette(darkPalette);
-
-    qApp->setStyleSheet("QToolTip { color: #ffffff; background-color: #2a82da; "
-                        "border: 1px solid white; }");
+  // Windows and Linux: an opt-in dark mode, from before Qt followed the
+  // desktop's own scheme there.
+  if (GetSettings()->value("Settings/darkMode").toBool()) {
+    ApplyLegacyDarkPalette();
   }
-
 #else
-
-  // enable dark mode for older macOS
-  QString sysInfo = QSysInfo::productVersion();
-
-  if (sysInfo == "10.9" || sysInfo == "10.10" || sysInfo == "10.11" ||
-      sysInfo == "10.12" || sysInfo == "10.13") {
-    auto settings = GetSettings();
-    bool darkMode = settings->value("Settings/darkMode").toBool();
-    if (darkMode) {
-      qApp->setStyle(QStyleFactory::create("Fusion"));
-
-      QPalette darkPalette;
-      darkPalette.setColor(QPalette::Window, QColor(53, 53, 53));
-      darkPalette.setColor(QPalette::WindowText, Qt::white);
-      darkPalette.setColor(QPalette::Base, QColor(25, 25, 25));
-      darkPalette.setColor(QPalette::AlternateBase, QColor(53, 53, 53));
-      darkPalette.setColor(QPalette::ToolTipBase, Qt::white);
-      darkPalette.setColor(QPalette::ToolTipText, Qt::white);
-      darkPalette.setColor(QPalette::Text, Qt::white);
-      darkPalette.setColor(QPalette::Button, QColor(53, 53, 53));
-      darkPalette.setColor(QPalette::ButtonText, Qt::white);
-      darkPalette.setColor(QPalette::BrightText, Qt::red);
-      darkPalette.setColor(QPalette::Link, QColor(42, 130, 218));
-
-      darkPalette.setColor(QPalette::Highlight, QColor(42, 130, 218));
-      darkPalette.setColor(QPalette::HighlightedText, Qt::black);
-
-      qApp->setPalette(darkPalette);
-
-      qApp->setStyleSheet("QToolTip { color: #ffffff; background-color: "
-                          "#2a82da; border: 1px solid white; }");
+  // macOS 10.13 and older: same preference, for versions that predate the
+  // system-wide dark appearance. Newer macOS follows the system, and this
+  // whole path is skipped.
+  const QString macVersion = QSysInfo::productVersion();
+  if (macVersion == "10.9" || macVersion == "10.10" || macVersion == "10.11" ||
+      macVersion == "10.12" || macVersion == "10.13") {
+    if (GetSettings()->value("Settings/darkMode").toBool()) {
+      ApplyLegacyDarkPalette();
     }
   }
 #endif
@@ -852,8 +849,11 @@ static QListWidgetItem *makeSectionHeading(const QString &text,
   font.setPointSizeF(font.pointSizeF() * 0.85);
   font.setCapitalization(QFont::AllUppercase);
   heading->setFont(font);
-  heading->setForeground(
-      qApp->palette().brush(QPalette::Disabled, QPalette::WindowText));
+  // No setForeground here, though it looks like the obvious place for one: a
+  // disabled item is painted from the palette's Disabled group and the item's
+  // own foreground brush is ignored. The colour comes from the theme sheet's
+  // ::item:disabled rule instead, which also follows the scheme when it
+  // changes -- a brush captured here would not.
 
   // Padding above a heading that follows another section, so the groups read
   // as separate rather than as one run of rows.

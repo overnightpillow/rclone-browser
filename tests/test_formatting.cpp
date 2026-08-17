@@ -3,6 +3,7 @@
 #include "restic.h"
 #include "utils.h"
 #include <QtTest>
+#include <cmath>
 
 // Every case here is a regression test: each one corresponds to a bug that was
 // actually present in the code at some point, not a hypothetical.
@@ -24,6 +25,7 @@ private slots:
   void commandLineQuoting();
 
   void themeAdaptsToPalette();
+  void themeKeepsDisabledRowsReadable();
   void themeHasNoHardcodedColours();
   void themeDefinesSelectionColours();
 };
@@ -243,6 +245,62 @@ void TestFormatting::themeHasNoHardcodedColours() {
 
   // What it should contain: colours built from the palette at runtime.
   QVERIFY(sheet.contains("rgba(10,20,30"));
+}
+
+void TestFormatting::themeKeepsDisabledRowsReadable() {
+  // The section headings in the remotes list are non-selectable rows, which
+  // Qt expresses as disabled items -- and a disabled item is painted from the
+  // palette's Disabled group, ignoring any foreground the item carries. On the
+  // system dark palette that group put the headings at near-black on
+  // near-black: "RCLONE REMOTES" and "RESTIC REPOSITORIES" were present, took
+  // up space, and could not be read.
+  auto contrastRatio = [](QColor foreground, const QColor &background) {
+    // Composite first: the muted colour is the text colour at reduced alpha,
+    // so the ratio depends on what it sits on.
+    const qreal alpha = foreground.alphaF();
+    foreground = QColor::fromRgbF(
+        foreground.redF() * alpha + background.redF() * (1 - alpha),
+        foreground.greenF() * alpha + background.greenF() * (1 - alpha),
+        foreground.blueF() * alpha + background.blueF() * (1 - alpha));
+
+    auto luminance = [](const QColor &c) {
+      auto channel = [](qreal v) {
+        return v <= 0.03928 ? v / 12.92 : std::pow((v + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * channel(c.redF()) + 0.7152 * channel(c.greenF()) +
+             0.0722 * channel(c.blueF());
+    };
+
+    const qreal light = std::max(luminance(foreground), luminance(background));
+    const qreal dark = std::min(luminance(foreground), luminance(background));
+    return (light + 0.05) / (dark + 0.05);
+  };
+
+  // The real system dark palette this was reported against.
+  QPalette darkPalette;
+  darkPalette.setColor(QPalette::Base, QColor(0x17, 0x17, 0x17));
+  darkPalette.setColor(QPalette::Text, QColor(0xff, 0xff, 0xff));
+
+  QPalette lightPalette;
+  lightPalette.setColor(QPalette::Base, QColor(0xff, 0xff, 0xff));
+  lightPalette.setColor(QPalette::Text, QColor(0x00, 0x00, 0x00));
+
+  for (const QPalette &palette : {darkPalette, lightPalette}) {
+    const QString sheet = ThemeStyleSheet(palette);
+
+    // The rule has to exist, or the palette's own Disabled group decides.
+    QVERIFY(sheet.contains("::item:disabled"));
+
+    const int at = sheet.indexOf("::item:disabled");
+    QVERIFY(sheet.mid(at, 200).contains("color:"));
+
+    // Muted is the intent -- these are chrome, not content -- but muted still
+    // has to be legible against the row it sits on.
+    const qreal ratio =
+        contrastRatio(SecondaryTextColor(palette), palette.color(QPalette::Base));
+    QVERIFY2(ratio >= 4.5,
+             qPrintable(QString("contrast ratio %1 is too low").arg(ratio)));
+  }
 }
 
 void TestFormatting::themeDefinesSelectionColours() {
