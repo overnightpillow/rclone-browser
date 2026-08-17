@@ -11,12 +11,26 @@ welcome, but there is no response-time commitment.
 ## Where to file things
 
 The public tracker is [GitHub Issues](https://github.com/overnightpillow/rclone-browser/issues).
-The repository is also pushed to a private Gitea instance, which is the origin
-of record; that mirror is not where discussion happens.
 
 For a bug, the useful details are your OS, your Qt version, the output of
 `rclone version`, and — if a listing or a snapshot is involved — the command
 shown in the error row.
+
+## How code reaches this repository
+
+GitHub is a **mirror**. Development happens on a private Gitea instance, which
+push-mirrors here; nothing is committed on GitHub directly.
+
+This matters for pull requests. Mirror syncs overwrite branches and prune refs
+that no longer exist upstream, so **a pull request merged on GitHub would be
+erased by the next sync**, silently and with no record. Pull requests are still
+the right way to propose a change and CI runs on them as normal — but they are
+landed by applying the commits on the Gitea side, which then mirrors back here.
+Expect your PR to be closed with a reference to the commit that carries your
+work rather than showing GitHub's purple "merged" badge. Authorship is
+preserved; the commit keeps your name.
+
+Issues, comments and releases are unaffected — the mirror only moves git refs.
 
 ## Building and testing
 

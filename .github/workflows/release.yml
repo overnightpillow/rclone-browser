@@ -1,0 +1,78 @@
+name: release
+
+# Releases cannot come from Gitea: the push mirror carries git refs only, so a
+# tag arrives here but a Gitea release and its attachments do not. Building the
+# artifacts on GitHub is what puts a download next to the tag.
+#
+# The release is left as a **draft** — publishing is a deliberate act, and the
+# macOS bundle is only ad-hoc signed, so it deserves a look before it is public.
+
+on:
+  push:
+    tags:
+      - '*.*.*'
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build a draft release for
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Install Qt6
+        run: brew install qt cmake ninja
+
+      - name: Build the bundle
+        run: scripts/release_macOS.sh --zip
+
+      - name: Checksum
+        working-directory: release
+        run: shasum -a 256 *.zip > SHA256SUMS
+
+      - name: Upload to a draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --title "$TAG" --notes "$(cat <<'NOTES'
+          See [CHANGELOG.md](CHANGELOG.md) for what changed.
+
+          ### macOS
+
+          The bundle is ad-hoc signed, not notarized, so macOS quarantines it on
+          first launch. Clear that after copying it to /Applications:
+
+          ```
+          xattr -dr com.apple.quarantine /Applications/rclone-browser.app
+          ```
+
+          ### Linux
+
+          Build from source for now — see the README. Ubuntu 24.04 and anything
+          shipping Qt 6.4 or newer will build; CI covers that on every push.
+
+          ### Windows
+
+          Unbuilt and untested. Reports from anyone who tries are welcome.
+          NOTES
+          )"
+          fi
+          gh release upload "$TAG" release/*.zip release/SHA256SUMS --clobber
+
+      # Keeps the artifact reachable even if the draft is discarded.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-bundle
+          path: release/*.zip
+          retention-days: 14
