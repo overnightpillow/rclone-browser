@@ -67,10 +67,11 @@ MainWindow::MainWindow() {
     this->setWindowTitle("rclone-browser");
   }
 
-#if defined(Q_OS_WIN)
-  // disable "?" WindowContextHelpButton
-  QApplication::setAttribute(Qt::AA_DisableWindowContextHelpButton);
-#endif
+  // Qt::AA_DisableWindowContextHelpButton used to be set here, to suppress the
+  // "?" button in dialog title bars on Windows. The attribute was deprecated in
+  // Qt 5.15 and removed in Qt 6, which no longer adds that button at all, so
+  // there is nothing left to disable -- and referring to it stopped the
+  // Windows build compiling.
 
 #if !defined(Q_OS_MACOS)
   // Windows and Linux: an opt-in dark mode, from before Qt followed the
