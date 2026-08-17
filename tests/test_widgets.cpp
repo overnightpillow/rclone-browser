@@ -172,7 +172,10 @@ void TestWidgets::remoteWidgetAcceptsMultipleDroppedFiles() {
   QTemporaryDir dir;
   QVERIFY(dir.isValid());
   QList<QUrl> urls;
-  for (const QString &name : {"one.txt", "two.txt", "three.txt"}) {
+  // QStringList, not a braced list of literals: the latter is an
+  // initializer_list<const char *>, so the reference binds to a temporary
+  // QString built each iteration, which GCC rejects under -Werror.
+  for (const QString &name : QStringList{"one.txt", "two.txt", "three.txt"}) {
     const QString path = QDir(dir.path()).filePath(name);
     QFile file(path);
     QVERIFY(file.open(QIODevice::WriteOnly));
