@@ -12,6 +12,8 @@ public:
 
   QString getRclone() const;
   QString getRcloneConf() const;
+  // Empty means "look restic up automatically".
+  QString getRestic() const;
   QString getStream() const;
   QString getMount() const;
   QString getDefaultDownloadDir() const;

@@ -9,6 +9,14 @@ void WriteSettings(QSettings *settings, QObject *widget);
 
 bool IsPortableMode();
 
+// Locates a helper binary the way a shell would, plus the package-manager
+// directories a shell adds to PATH but a GUI app does not. An app launched
+// from Finder or a .desktop file inherits launchd's or the session's bare
+// PATH, so a Homebrew or MacPorts install is invisible to a plain PATH
+// lookup even though it works fine from a terminal. Returns an empty string
+// if nothing is found.
+QString FindHelperExecutable(const QString &name);
+
 QString GetRclone();
 void SetRclone(const QString &rclone);
 
@@ -32,6 +40,12 @@ void StyleToolBar(QToolBar *toolBar);
 // what let two tabs fight over it. ItemModel and RemoteWidget each hold their
 // own, and pass it to whatever they run.
 QStringList GetDefaultRcloneOptionsList();
+
+// Arguments that make rclone print its periodic stats block, which
+// ProgressDialog renders as a progress bar. --stats on its own is not enough:
+// the block is logged at INFO level, which the default log level drops, and
+// --verbose would turn it on at the cost of a line per file in the output.
+QStringList GetRcloneProgressArgs();
 QStringList GetShowHidden();
 
 // Joins an argument list into a command line that can be pasted into a

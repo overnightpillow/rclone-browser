@@ -220,6 +220,22 @@ QString root = isLocal ? "/" : QString();
     }
     const QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
+
+    // Asked before the name prompt so nobody types a folder name for an
+    // operation that cannot do anything. rclone's mkdir reports success on
+    // these backends and stores nothing, so without this the dialog closed
+    // like it had worked and the folder was simply never there.
+    if (!isLocal && canHaveEmptyDirectories(remote) == std::optional<bool>(false)) {
+      QMessageBox::information(
+          this, "New Folder",
+          QString("%1: cannot store empty folders.\n\nOn this kind of remote a "
+                  "folder is only the leading part of a file's name, so it "
+                  "exists exactly as long as it holds a file. Upload into "
+                  "%2 and the folder appears with the first file in it.")
+              .arg(remote, pathMsg.isEmpty() ? QString("the remote") : pathMsg));
+      return;
+    }
+
     QString name = QInputDialog::getText(
         this, "New Folder", QString("Create folder in %1").arg(pathMsg));
     if (!name.isEmpty()) {
@@ -298,7 +314,8 @@ QString root = isLocal ? "/" : QString();
       // named to the name given, for a file or a folder alike.
       process.setArguments(
           QStringList() << "moveto" << GetRcloneConf() << driveSharedArgs()
-                        << GetDefaultRcloneOptionsList() << remote + ":" + path
+                        << GetDefaultRcloneOptionsList()
+                        << GetRcloneProgressArgs() << remote + ":" + path
                         << remote + ":" + name);
       process.setProcessChannelMode(QProcess::MergedChannels);
 
@@ -330,6 +347,7 @@ QString root = isLocal ? "/" : QString();
                            << (model->isFolder(index) ? "purge" : "delete")
                            << GetRcloneConf() << driveSharedArgs()
                            << GetDefaultRcloneOptionsList()
+                           << GetRcloneProgressArgs()
                            << remote + ":" + path);
       process.setProcessChannelMode(QProcess::MergedChannels);
 
@@ -741,4 +759,36 @@ RemoteWidget::~RemoteWidget() {}
 QStringList RemoteWidget::driveSharedArgs() const {
   return ui.checkBoxShared->isChecked() ? QStringList{"--drive-shared-with-me"}
                                         : QStringList();
+}
+
+std::optional<bool>
+RemoteWidget::canHaveEmptyDirectories(const QString &remote) {
+  if (mCanHaveEmptyDirectories.has_value()) {
+    return mCanHaveEmptyDirectories;
+  }
+
+  // Run in the foreground: this answers a question the user is waiting on,
+  // and "backend features" is a local property of the backend rather than a
+  // listing, so it comes back in well under a second.
+  QProcess process;
+  UseRclonePassword(&process);
+  process.start(GetRclone(),
+                QStringList() << "backend" << "features" << GetRcloneConf()
+                              << remote + ":",
+                QIODevice::ReadOnly);
+
+  if (!process.waitForFinished(5000) || process.exitCode() != 0) {
+    // rclone missing, too slow or unhappy: claim nothing, and let the mkdir
+    // go ahead as it always did.
+    return std::nullopt;
+  }
+
+  bool canHave = false;
+  if (!ParseRcloneFeature(process.readAllStandardOutput(),
+                          "CanHaveEmptyDirectories", &canHave)) {
+    return std::nullopt;
+  }
+
+  mCanHaveEmptyDirectories = canHave;
+  return mCanHaveEmptyDirectories;
 }

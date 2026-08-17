@@ -29,8 +29,14 @@ QString ShellQuote(const QString &argument);
 QList<ResticRepo> GetResticRepos();
 void SetResticRepos(const QList<ResticRepo> &repos);
 
+// The restic binary to run: the configured location, else a search of PATH and
+// the usual package-manager directories, else the bare name "restic".
 QString GetRestic();
 void SetRestic(const QString &restic);
+
+// Shown when the binary above cannot be executed, which is what a bundled app
+// sees when restic is installed somewhere PATH does not reach.
+QString ResticNotFoundMessage(const QString &program);
 
 // Ensures a usable password source for the repository, prompting if the repo
 // has no password command and nothing is cached yet. Returns false if the user

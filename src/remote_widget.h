@@ -34,4 +34,13 @@ private:
   // "--drive-shared-with-me" when this tab's check box is ticked, empty
   // otherwise. Every rclone command this widget runs takes it from here.
   QStringList driveSharedArgs() const;
+
+  // Whether this remote can hold a folder with nothing in it. Object storage
+  // backends -- S3, B2, Storj -- cannot: a folder there is only a shared
+  // prefix of object names, so "rclone mkdir" succeeds and stores nothing.
+  //
+  // Asked of rclone once per tab, on the first New Folder, and remembered.
+  // Unset means rclone could not be asked, in which case nothing is claimed.
+  std::optional<bool> mCanHaveEmptyDirectories;
+  std::optional<bool> canHaveEmptyDirectories(const QString &remote);
 };

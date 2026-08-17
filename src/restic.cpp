@@ -78,9 +78,18 @@ QString GetRestic() {
   if (!configured.isEmpty()) {
     return configured;
   }
-  // Fall back to PATH lookup so the common case needs no configuration.
-  const QString found = QStandardPaths::findExecutable("restic");
+  // Fall back to a lookup so the common case needs no configuration. This has
+  // to search beyond PATH: a bundled app started from Finder never sees
+  // /opt/homebrew/bin, so a plain PATH lookup silently produced the bare word
+  // "restic", QProcess failed to start it, and the snapshot list hung.
+  const QString found = FindHelperExecutable("restic");
   return found.isEmpty() ? QStringLiteral("restic") : found;
+}
+
+QString ResticNotFoundMessage(const QString &program) {
+  return QString("Cannot run restic (%1). Set the restic location in "
+                 "Preferences, or install restic.")
+      .arg(program);
 }
 
 void SetRestic(const QString &restic) {

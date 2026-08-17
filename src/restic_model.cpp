@@ -261,12 +261,61 @@ void ResticModel::setPlaceholder(const QPersistentModelIndex &parentIndex,
   endInsertRows();
 }
 
-QProcess *ResticModel::startRestic(const QStringList &args) {
+void ResticModel::runRestic(const QStringList &args,
+                            std::function<void(bool, const QString &,
+                                               const QByteArray &)>
+                                done) {
   auto *process = new QProcess(this);
   ApplyResticEnvironment(process, mRepo);
-  process->start(GetRestic(), ResticBaseArgs(mRepo) + args,
-                 QIODevice::ReadOnly);
-  return process;
+
+  const QString program = GetRestic();
+
+  // finished() and errorOccurred() can both fire for one process -- a crash
+  // reports an error and then finishes -- and FailedToStart fires alone.
+  auto called = std::make_shared<bool>(false);
+  auto report = [this, process, called, done](bool ok, const QString &error,
+                                              const QByteArray &output) {
+    if (*called) {
+      return;
+    }
+    *called = true;
+    process->deleteLater();
+
+    if (!ok) {
+      emit failed(error);
+    }
+    done(ok, error, output);
+  };
+
+  QObject::connect(process, &QProcess::errorOccurred, this,
+                   [program, report](QProcess::ProcessError e) {
+                     if (e != QProcess::FailedToStart) {
+                       // Anything else still reaches finished(), which has the
+                       // exit code and stderr to report.
+                       return;
+                     }
+                     report(false, ResticNotFoundMessage(program), QByteArray());
+                   });
+
+  QObject::connect(process, &QProcess::finished, this,
+                   [process, report](int exitCode,
+                                     QProcess::ExitStatus status) {
+                     if (status == QProcess::NormalExit && exitCode == 0) {
+                       report(true, QString(),
+                              process->readAllStandardOutput());
+                       return;
+                     }
+
+                     QString error =
+                         QString::fromUtf8(process->readAllStandardError())
+                             .trimmed();
+                     if (error.isEmpty()) {
+                       error = process->errorString();
+                     }
+                     report(false, error, QByteArray());
+                   });
+
+  process->start(program, ResticBaseArgs(mRepo) + args, QIODevice::ReadOnly);
 }
 
 void ResticModel::refresh() {
@@ -279,28 +328,19 @@ void ResticModel::loadSnapshots() {
   const QPersistentModelIndex rootIndex;
   setPlaceholder(rootIndex, mRoot, "... loading snapshots");
 
-  QProcess *process = startRestic(QStringList() << "snapshots" << "--json");
-
-  QObject::connect(
-      process, &QProcess::finished, this,
-      [this, process, rootIndex](int exitCode, QProcess::ExitStatus status) {
-        process->deleteLater();
-
-        if (status != QProcess::NormalExit || exitCode != 0) {
-          QString error =
-              QString::fromUtf8(process->readAllStandardError()).trimmed();
-          if (error.isEmpty()) {
-            error = process->errorString();
-          }
-          setPlaceholder(rootIndex, mRoot, "... error: " + error.section('\n', -1));
-          emit failed(error);
+  runRestic(
+      QStringList() << "snapshots" << "--json",
+      [this, rootIndex](bool ok, const QString &error,
+                        const QByteArray &output) {
+        if (!ok) {
+          setPlaceholder(rootIndex, mRoot,
+                         "... error: " + error.section('\n', -1));
           return;
         }
 
         QVector<ResticSnapshot> parsed;
         QString parseErrorText;
-        if (!ParseResticSnapshots(process->readAllStandardOutput(), &parsed,
-                                  &parseErrorText)) {
+        if (!ParseResticSnapshots(output, &parsed, &parseErrorText)) {
           setPlaceholder(rootIndex, mRoot, "... error: " + parseErrorText);
           emit failed(parseErrorText);
           return;
@@ -347,26 +387,15 @@ void ResticModel::loadSnapshotTree(const QPersistentModelIndex &parentIndex,
   // restic ls has no depth limit -- it walks the whole snapshot -- so the
   // entire tree is fetched once per snapshot and cached, rather than lazily
   // per directory the way the rclone side works.
-  QProcess *process = startRestic(QStringList()
-                                  << "ls" << "--json" << "--long"
-                                  << snapshot->snapshotId);
-
-  QObject::connect(
-      process, &QProcess::finished, this,
-      [this, process, parentIndex, snapshot](int exitCode,
-                                             QProcess::ExitStatus status) {
-        process->deleteLater();
+  runRestic(
+      QStringList() << "ls" << "--json" << "--long" << snapshot->snapshotId,
+      [this, parentIndex, snapshot](bool ok, const QString &error,
+                                    const QByteArray &output) {
         snapshot->loading = false;
 
-        if (status != QProcess::NormalExit || exitCode != 0) {
-          QString error =
-              QString::fromUtf8(process->readAllStandardError()).trimmed();
-          if (error.isEmpty()) {
-            error = process->errorString();
-          }
+        if (!ok) {
           setPlaceholder(parentIndex, snapshot,
                          "... error: " + error.section('\n', -1));
-          emit failed(error);
           return;
         }
 
@@ -379,7 +408,7 @@ void ResticModel::loadSnapshotTree(const QPersistentModelIndex &parentIndex,
         // would either bypass the model signals or force a full model reset,
         // which collapses every other expanded row in the view.
         QVector<ResticNode> nodes;
-        ParseResticNodes(process->readAllStandardOutput(), &nodes, nullptr);
+        ParseResticNodes(output, &nodes, nullptr);
 
         snapshot->loaded = true;
 

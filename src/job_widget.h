@@ -14,6 +14,9 @@ public:
 
   void showDetails();
 
+  // Whether this job was stopped by the user rather than by rclone finishing.
+  bool wasCancelled() const { return mCancelled; }
+
   // Applies one line of rclone output to the panel. Public so the panel can be
   // driven from a test without a process behind it.
   void applyOutputLine(const QString &line);
@@ -22,7 +25,9 @@ public slots:
   void cancel();
 
 signals:
-  void finished(const QString &info);
+  // success is false for a non-zero exit, a crash, and a cancelled job alike;
+  // wasCancelled() tells the last of those apart.
+  void finished(const QString &info, bool success);
   void closed();
 
 private:

@@ -112,8 +112,11 @@ void ResticWidget::restoreSelection() {
     return;
   }
 
+  // --json is what makes restore report progress at all: without a terminal
+  // restic prints nothing until it is finished, so the dialog looked frozen
+  // for the whole restore. ProgressDialog turns those records into a bar.
   QStringList args;
-  args << "restore" << snapshot << "--target" << target;
+  args << "restore" << "--json" << snapshot << "--target" << target;
 
   const QString path = mModel->path(index);
   QString description;

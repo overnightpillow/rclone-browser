@@ -65,6 +65,11 @@ private:
 
   void addEmptyJobsMessage();
 
+  // A desktop notification, delivered even when the tray icon is hidden --
+  // which it is unless "always show in tray" is on, and Qt silently drops a
+  // message posted from a hidden icon.
+  void notify(const QString &title, const QString &message);
+
   // Restic: opens a repository in its own tab, prompting for the password
   // first when the repository has no password command configured.
   void openResticRepo(const ResticRepo &repo);

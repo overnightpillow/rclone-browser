@@ -27,6 +27,22 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
     ui.rclone->setText(rclone);
   });
 
+  QObject::connect(ui.resticBrowse, &QPushButton::clicked, this, [=]() {
+    QString restic = QFileDialog::getOpenFileName(
+        this, "Select restic executable", ui.restic->text());
+    if (restic.isEmpty()) {
+      return;
+    }
+
+    if (!QFileInfo(restic).isExecutable()) {
+      QMessageBox::critical(this, "Error",
+                            QString("File %1 is not executable").arg(restic));
+      return;
+    }
+
+    ui.restic->setText(restic);
+  });
+
   QObject::connect(ui.rcloneConfBrowse, &QPushButton::clicked, this, [=]() {
     QString rcloneConf = QFileDialog::getOpenFileName(
         this, "Select .rclone.conf location", ui.rcloneConf->text());
@@ -68,6 +84,14 @@ PreferencesDialog::PreferencesDialog(QWidget *parent) : QDialog(parent) {
       QDir::toNativeSeparators(settings->value("Settings/rclone").toString()));
   ui.rcloneConf->setText(QDir::toNativeSeparators(
       settings->value("Settings/rcloneConf").toString()));
+  ui.restic->setText(
+      QDir::toNativeSeparators(settings->value("Settings/restic").toString()));
+  // Left empty the field means "find it", so show what that currently finds --
+  // including when it finds nothing, which is the state worth noticing.
+  const QString foundRestic = FindHelperExecutable("restic");
+  ui.restic->setPlaceholderText(
+      foundRestic.isEmpty() ? QString("restic not found - set its location here")
+                            : QDir::toNativeSeparators(foundRestic));
   ui.stream->setText(settings->value("Settings/stream").toString());
 
 #if defined(Q_OS_OPENBSD) || defined(Q_OS_NETBSD)
@@ -158,6 +182,10 @@ PreferencesDialog::~PreferencesDialog() {}
 
 QString PreferencesDialog::getRclone() const {
   return QDir::fromNativeSeparators(ui.rclone->text());
+}
+
+QString PreferencesDialog::getRestic() const {
+  return QDir::fromNativeSeparators(ui.restic->text());
 }
 
 QString PreferencesDialog::getRcloneConf() const {

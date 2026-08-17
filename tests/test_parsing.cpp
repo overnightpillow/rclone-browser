@@ -34,6 +34,8 @@ private slots:
   void statsFileProgressBeforeRateIsKnown();
   void statsLogLinesAreNotStats();
 
+  void rcloneFeatureFlag();
+
   void resticSnapshotsNewestFirst();
   void resticSnapshotsMalformed();
 
@@ -41,6 +43,12 @@ private slots:
   void resticTreeNesting();
   void resticTreeOutOfOrderNodes();
   void resticTreeSortsFoldersFirst();
+
+  void resticRestoreStatus();
+  void resticRestoreStatusBeforeTotalsAreKnown();
+  void resticRestoreSummary();
+  void resticProgressIgnoresOtherRecords();
+  void resticErrorRecordsBecomeSentences();
 };
 
 void TestParsing::rcloneListing() {
@@ -448,6 +456,107 @@ void TestParsing::resticTreeSortsFoldersFirst() {
   QCOMPARE(root->children[3]->name, QString("zebra.txt"));
 
   delete root;
+}
+
+// Captured from restic 0.18.1: "restic restore --json" emits a status record
+// about once a second and one summary at the end.
+void TestParsing::resticRestoreStatus() {
+  const QByteArray line =
+      R"({"message_type":"status","percent_done":0.446989917755127,"total_files":7,"files_restored":2,"total_bytes":125829120,"bytes_restored":56244348})";
+
+  ResticProgress progress;
+  QVERIFY(ParseResticProgress(line, &progress));
+  QCOMPARE(progress.kind, ResticProgress::Status);
+  QCOMPARE(qRound(progress.percent), 45);
+  QCOMPARE(progress.bytesDone, quint64(56244348));
+  QCOMPARE(progress.totalBytes, quint64(125829120));
+  QCOMPARE(progress.filesDone, quint64(2));
+  QCOMPARE(progress.totalFiles, quint64(7));
+}
+
+void TestParsing::resticRestoreStatusBeforeTotalsAreKnown() {
+  // files_restored is absent until the first file finishes, and there is no
+  // percentage at all on the first record.
+  const QByteArray line =
+      R"({"message_type":"status","total_files":7,"total_bytes":125829120,"bytes_restored":9225509})";
+
+  ResticProgress progress;
+  QVERIFY(ParseResticProgress(line, &progress));
+  QCOMPARE(progress.kind, ResticProgress::Status);
+  QVERIFY(progress.percent < 0);
+  QCOMPARE(progress.filesDone, quint64(0));
+  QCOMPARE(progress.bytesDone, quint64(9225509));
+}
+
+void TestParsing::resticRestoreSummary() {
+  const QByteArray line =
+      R"({"message_type":"summary","total_files":7,"files_restored":7,"total_bytes":125829120,"bytes_restored":125829120})";
+
+  ResticProgress progress;
+  QVERIFY(ParseResticProgress(line, &progress));
+  QCOMPARE(progress.kind, ResticProgress::Summary);
+  QCOMPARE(progress.percent, 100.0);
+  QCOMPARE(progress.filesDone, quint64(7));
+}
+
+void TestParsing::resticProgressIgnoresOtherRecords() {
+  ResticProgress progress;
+  QVERIFY(!ParseResticProgress("", &progress));
+  QVERIFY(!ParseResticProgress("Fatal: wrong password", &progress));
+  QVERIFY(!ParseResticProgress("{ not json", &progress));
+  QVERIFY(!ParseResticProgress(
+      R"({"message_type":"error","error":{"message":"denied"}})", &progress));
+  // An rclone stats line is not a restic record either.
+  QVERIFY(!ParseResticProgress(
+      "Transferred:   \t    3.027 MiB / 20 MiB, 15%, 3.027 MiB/s, ETA 5s",
+      &progress));
+}
+
+void TestParsing::resticErrorRecordsBecomeSentences() {
+  QCOMPARE(ResticMessageText(
+               R"({"message_type":"exit_error","code":12,"message":"Fatal: wrong password or no key found"})"),
+           QString("Fatal: wrong password or no key found"));
+  QCOMPARE(ResticMessageText(
+               R"({"message_type":"error","error":{"message":"permission denied"}})"),
+           QString("permission denied"));
+
+  // Everything that is not an error record is left alone, so rclone's output
+  // and restic's own progress records go through untouched.
+  QVERIFY(ResticMessageText("Transferred: 1 / 1, 100%").isEmpty());
+  QVERIFY(ResticMessageText(R"({"message_type":"status","percent_done":0.5})")
+              .isEmpty());
+  QVERIFY(ResticMessageText("").isEmpty());
+}
+
+// Trimmed from "rclone backend features storj-us1-truenas:" (rclone 1.71).
+void TestParsing::rcloneFeatureFlag() {
+  const QByteArray json = R"({
+"Name": "storj-us1-truenas",
+"Root": "",
+"Precision": 1,
+"Features": {
+"About": false,
+"BucketBased": true,
+"CanHaveEmptyDirectories": false,
+"Copy": true
+}
+})";
+
+  bool value = true;
+  QVERIFY(ParseRcloneFeature(json, "CanHaveEmptyDirectories", &value));
+  QCOMPARE(value, false);
+
+  QVERIFY(ParseRcloneFeature(json, "BucketBased", &value));
+  QCOMPARE(value, true);
+
+  // An unknown flag, or output that is not this command's, leaves the caller's
+  // value alone: not knowing is not the same as a "no".
+  bool untouched = true;
+  QVERIFY(!ParseRcloneFeature(json, "NoSuchFeature", &untouched));
+  QVERIFY(!ParseRcloneFeature("not json", "CanHaveEmptyDirectories",
+                              &untouched));
+  QVERIFY(!ParseRcloneFeature("", "CanHaveEmptyDirectories", &untouched));
+  QCOMPARE(untouched, true);
 }
 
 QTEST_MAIN(TestParsing)

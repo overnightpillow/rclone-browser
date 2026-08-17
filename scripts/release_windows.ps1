@@ -74,9 +74,32 @@ Write-Host '==> Bundling Qt'
 # --no-translations keeps the download small; the application has no
 # translations of its own. The image format plugins stay: the icon cache reads
 # whatever the shell hands it.
-windeployqt --release --no-translations --no-compiler-runtime `
+#
+# --compiler-runtime, emphatically not --no-compiler-runtime, which is what
+# this said at first: without the Visual C++ runtime DLLs beside the
+# executable, the application starts only on a machine that already has the
+# Visual C++ Redistributable installed. Developer machines do. A clean
+# Windows 11 does not, and refuses to launch with four missing-DLL dialogs.
+windeployqt --release --no-translations --compiler-runtime `
     (Join-Path $Stage "$AppName.exe")
 if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+
+# windeployqt takes the runtime from the compiler environment, so if it was run
+# outside a developer shell it quietly deploys nothing. Copy them directly in
+# that case rather than shipping another broken zip.
+$Runtime = @('msvcp140.dll', 'vcruntime140.dll')
+if ($Arch -eq 'x64') { $Runtime += @('msvcp140_1.dll', 'vcruntime140_1.dll') }
+
+if (($Runtime | Where-Object { -not (Test-Path (Join-Path $Stage $_)) }) -and
+    $env:VCToolsRedistDir) {
+    Write-Host '==> windeployqt left the runtime out; copying it from the toolchain'
+    $CrtDir = Get-ChildItem -Path (Join-Path $env:VCToolsRedistDir $Arch) `
+        -Filter 'Microsoft.VC*.CRT' -Directory -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($CrtDir) {
+        Copy-Item (Join-Path $CrtDir.FullName '*.dll') $Stage -Force
+    }
+}
 
 Write-Host '==> Verifying the staged application'
 foreach ($dll in @('Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll')) {
@@ -86,6 +109,17 @@ foreach ($dll in @('Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dl
 }
 if (-not (Test-Path (Join-Path $Stage 'platforms\qwindows.dll'))) {
     throw 'the Windows platform plugin is missing; the application would not start'
+}
+
+# The check that would have caught this before anyone downloaded it. There is
+# no Windows machine here to launch the result on, so the build failing is the
+# only thing standing between a missing DLL and a release nobody can run.
+$MissingRuntime = $Runtime | Where-Object { -not (Test-Path (Join-Path $Stage $_)) }
+if ($MissingRuntime) {
+    throw ("the Visual C++ runtime is missing from the staged application: " +
+           ($MissingRuntime -join ', ') +
+           ". It would not start on a machine without the Visual C++ " +
+           "Redistributable installed.")
 }
 
 Write-Host '==> Zipping'

@@ -227,3 +227,79 @@ bool ParseResticNodes(const QByteArray &jsonLines, QVector<ResticNode> *nodes,
 
   return true;
 }
+
+bool ParseResticProgress(const QByteArray &line, ResticProgress *progress) {
+  Q_ASSERT(progress);
+
+  const QByteArray trimmed = line.trimmed();
+  if (trimmed.isEmpty() || !trimmed.startsWith('{')) {
+    return false;
+  }
+
+  const QJsonObject object = QJsonDocument::fromJson(trimmed).object();
+  const QString type = object.value("message_type").toString();
+
+  ResticProgress parsed;
+  if (type == "status") {
+    parsed.kind = ResticProgress::Status;
+    // percent_done is a fraction, and is absent until restic has scanned
+    // enough to know the total.
+    if (object.contains("percent_done")) {
+      parsed.percent = object.value("percent_done").toDouble() * 100.0;
+    }
+  } else if (type == "summary") {
+    parsed.kind = ResticProgress::Summary;
+    parsed.percent = 100;
+  } else {
+    return false;
+  }
+
+  const auto number = [&object](const char *key) -> quint64 {
+    const qint64 value = object.value(QLatin1String(key)).toVariant().toLongLong();
+    return value > 0 ? quint64(value) : 0;
+  };
+
+  parsed.bytesDone = number("bytes_restored");
+  parsed.totalBytes = number("total_bytes");
+  parsed.filesDone = number("files_restored");
+  parsed.totalFiles = number("total_files");
+
+  *progress = parsed;
+  return true;
+}
+
+QString ResticMessageText(const QByteArray &line) {
+  const QByteArray trimmed = line.trimmed();
+  if (trimmed.isEmpty() || !trimmed.startsWith('{')) {
+    return QString();
+  }
+
+  const QJsonObject object = QJsonDocument::fromJson(trimmed).object();
+  const QString type = object.value("message_type").toString();
+  if (type != "error" && type != "exit_error") {
+    return QString();
+  }
+
+  // "exit_error" carries the text directly; "error" nests it under "error".
+  const QString message = object.value("message").toString();
+  if (!message.isEmpty()) {
+    return message;
+  }
+  return object.value("error").toObject().value("message").toString();
+}
+
+bool ParseRcloneFeature(const QByteArray &json, const QString &feature,
+                        bool *value) {
+  Q_ASSERT(value);
+
+  const QJsonObject features =
+      QJsonDocument::fromJson(json).object().value("Features").toObject();
+
+  const QJsonValue flag = features.value(feature);
+  if (!flag.isBool()) {
+    return false;
+  }
+
+  *value = flag.toBool();
+  return true;
+}

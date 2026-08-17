@@ -99,6 +99,35 @@ bool IsPortableMode() {
   return QFileInfo::exists(GetIniFilename());
 }
 
+QString FindHelperExecutable(const QString &name) {
+  const QString onPath = QStandardPaths::findExecutable(name);
+  if (!onPath.isEmpty()) {
+    return onPath;
+  }
+
+  // Nothing on PATH. That is the normal case for a bundled app: launchd hands
+  // a Finder-launched process PATH=/usr/bin:/bin:/usr/sbin:/sbin, so anything
+  // installed by a package manager is missed even though "which" finds it in
+  // a terminal. Look where those package managers actually install.
+  static const QStringList extraDirs = {
+#ifdef Q_OS_MACOS
+      "/opt/homebrew/bin",  // Homebrew, Apple silicon
+      "/usr/local/bin",     // Homebrew, Intel
+      "/opt/local/bin",     // MacPorts
+#else
+      "/usr/local/bin",
+      "/usr/bin",
+      "/bin",
+      "/snap/bin",
+#endif
+      QDir::homePath() + "/bin",
+      QDir::homePath() + "/.local/bin",
+      QDir::homePath() + "/go/bin",
+  };
+
+  return QStandardPaths::findExecutable(name, extraDirs);
+}
+
 std::unique_ptr<QSettings> GetSettings() {
   if (IsPortableMode()) {
     return std::unique_ptr<QSettings>(
@@ -301,6 +330,11 @@ QStringList GetDefaultRcloneOptionsList() {
     }
   }
   return defaultRcloneOptionsList;
+}
+
+QStringList GetRcloneProgressArgs() {
+  return QStringList() << "--stats" << "1s" << "--stats-file-name-length" << "0"
+                       << "--stats-log-level" << "NOTICE";
 }
 
 QString BuildCommandLine(const QStringList &args) {

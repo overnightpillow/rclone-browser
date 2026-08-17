@@ -56,6 +56,35 @@ existing preferences and saved tasks carry over untouched.
     text-scraping.
 -   CHANGED: modification times display in local time rather than whatever zone
     rclone printed.
+-   CHANGED: running a task switches to the Jobs tab, where its progress, its
+    per-file transfers and its output are. Running one used to leave you
+    looking at the task list, where nothing visibly happened at all.
+-   FIXED: a finished transfer said whether it had worked nowhere except in the
+    Jobs tab. It now reports "Transfer finished" or "Transfer failed" in the
+    status bar and as a desktop notification, a failed job opens its own output
+    so the reason is on screen, and cancelling reports nothing since it was
+    asked for. The notification was previously posted to a tray icon that is
+    hidden unless "always show in tray" is on, and Qt drops a message sent from
+    a hidden icon -- so with the default settings it notified nobody.
+-   CHANGED: New Folder says so when the remote cannot hold an empty folder.
+    On object storage — S3, B2, Storj — a folder is only the leading part of a
+    file's name, so `rclone mkdir` reports success and stores nothing: the
+    dialog closed as though it had worked and the folder was never there.
+-   CHANGED: the operation dialog — Move, Delete and restic Restore — shows a
+    progress bar with the bytes done, the rate and an ETA, instead of a static
+    "Moving..." label for however long the operation takes. rclone is asked for
+    its periodic stats block, and restic restore is run with `--json`, which is
+    the only way it reports progress at all when it is not attached to a
+    terminal. A restic failure is shown as its sentence rather than as the raw
+    JSON record.
+-   FIXED: restic repositories sat on "... loading snapshots" forever in the
+    released builds. An app launched from Finder inherits `PATH` from launchd,
+    which does not include `/opt/homebrew/bin`, so restic was never found;
+    the resulting process failed to start, and a process that never starts
+    never reports finishing. restic is now looked for in the usual package
+    manager locations as well as on `PATH`, its location can be set in
+    Preferences, and a helper that cannot be run reports that instead of
+    leaving a progress row spinning.
 -   FIXED: the transfer details panel had been blank since rclone 1.56 changed
     its stats format four years ago: Size, Total size, Bandwidth and ETA stayed
     empty for every transfer. Three smaller breaks in the same output are fixed

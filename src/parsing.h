@@ -73,6 +73,13 @@ struct RcloneStats {
 // which is the common case: most of rclone's output is log lines.
 RcloneStats ParseRcloneStats(const QString &line);
 
+// Reads one flag out of "rclone backend features <remote>:", which reports
+// what a backend can do as a JSON object of booleans under "Features".
+// Returns false when the output cannot be parsed or does not carry the flag,
+// leaving value untouched -- an unknown answer is not a "no".
+bool ParseRcloneFeature(const QByteArray &json, const QString &feature,
+                        bool *value);
+
 // One snapshot from "restic snapshots --json".
 struct ResticSnapshot {
   QString id;
@@ -104,3 +111,44 @@ struct ResticNode {
 // entire snapshot.
 bool ParseResticNodes(const QByteArray &jsonLines, QVector<ResticNode> *nodes,
                       QString *error);
+
+// One progress record from a restic command run with --json.
+//
+// Only restore is parsed here, and only the two records it emits: a "status"
+// roughly once a second while it runs, and one "summary" at the end. restic
+// omits fields it has nothing to say about yet -- files_restored is absent
+// until the first file is complete -- so every field has to survive being
+// missing.
+struct ResticProgress {
+  enum Kind {
+    // Not a progress record: another message type, or not JSON at all.
+    Other,
+    Status,
+    Summary,
+  };
+
+  Kind kind = Other;
+
+  // 0 to 100. Negative when restic reported no percentage, which happens on
+  // the first records before it knows the total.
+  double percent = -1;
+
+  quint64 bytesDone = 0;
+  quint64 totalBytes = 0;
+  quint64 filesDone = 0;
+  quint64 totalFiles = 0;
+};
+
+// Parses one line of restic's --json output. Returns false for anything that
+// is not a status or summary record, including blank lines, log lines and
+// error records, leaving progress untouched.
+bool ParseResticProgress(const QByteArray &line, ResticProgress *progress);
+
+// With --json, restic reports failures as JSON too:
+//
+//   {"message_type":"exit_error","code":12,"message":"Fatal: wrong password"}
+//
+// Returns the human-readable part, so what reaches the output pane is the
+// sentence rather than the record. Empty for anything else, including the
+// plain-text output of every other command.
+QString ResticMessageText(const QByteArray &line);

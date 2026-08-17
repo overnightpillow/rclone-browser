@@ -1,9 +1,12 @@
 #include "icon_cache.h"
 #include "item_model.h"
 #include "job_widget.h"
+#include "progress_dialog.h"
 #include "remote_widget.h"
 #include "restic.h"
+#include "restic_model.h"
 #include "restic_widget.h"
+#include "utils.h"
 #include <QtTest>
 
 // Deliberately shallow: these ask "does interacting with this crash", not
@@ -39,10 +42,26 @@ private slots:
 
   void jobWidgetShowsStatsFromRcloneOutput();
   void jobWidgetCancelDoesNotBlock();
+  void jobWidgetReportsFailure();
 
   void resticWidgetConstructs();
   void resticWidgetSurvivesDestruction();
+  void resticModelReportsAMissingResticBinary();
+  void helperLookupLooksBeyondPath();
+
+  void progressDialogTracksRcloneProgress();
+  void progressDialogTracksResticProgress();
+  void progressDialogStaysBareWithoutProgress();
 };
+
+// The dialog starts the process it is given; a binary that does not exist
+// keeps these tests off the network and off any real repository, and the
+// output lines are fed in by hand anyway.
+static QProcess *makeDeadProcess(QObject *parent) {
+  auto *process = new QProcess(parent);
+  process->setProgram(QDir(QDir::tempPath()).filePath("rrm-no-such-binary"));
+  return process;
+}
 
 void TestWidgets::initTestCase() {
   // Keep the tests off the developer's real configuration.
@@ -344,6 +363,148 @@ void TestWidgets::resticWidgetSurvivesDestruction() {
 
   QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
   QCoreApplication::processEvents();
+}
+
+// A restic that cannot be executed produces no finished() at all, only
+// errorOccurred(). The shipped app hit exactly this -- a bundle launched from
+// Finder does not see /opt/homebrew/bin -- and sat on "... loading snapshots"
+// forever. The list has to end up in a state the user can read instead.
+void TestWidgets::resticModelReportsAMissingResticBinary() {
+  const QString previous = GetRestic();
+  SetRestic(QDir(QDir::tempPath()).filePath("rrm-no-such-restic-binary"));
+
+  ResticRepo repo;
+  repo.name = "test";
+  repo.repository = QDir(QDir::tempPath()).filePath("rrm-nonexistent-repo");
+  repo.passwordCommand = "echo test";
+
+  ResticModel model(repo, nullptr);
+  QSignalSpy failures(&model, &ResticModel::failed);
+
+  QTRY_VERIFY_WITH_TIMEOUT(failures.count() == 1, 5000);
+
+  QCOMPARE(model.rowCount(QModelIndex()), 1);
+  const QModelIndex row = model.index(0, 0, QModelIndex());
+  QVERIFY(model.isPlaceholder(row));
+  QVERIFY(model.data(row, Qt::DisplayRole).toString().startsWith("... error"));
+
+  SetRestic(previous);
+}
+
+// Run this binary under a bare PATH (env -i PATH=/usr/bin:/bin) to reproduce
+// what a Finder-launched bundle sees: the plain PATH lookup comes back empty
+// and only the package-manager directories find the binary.
+void TestWidgets::helperLookupLooksBeyondPath() {
+  const QString found = FindHelperExecutable("restic");
+  if (found.isEmpty()) {
+    // Nothing to assert on a machine without restic; CI is one of those.
+    qInfo("restic is not installed here, skipping");
+    return;
+  }
+  QVERIFY(QFileInfo(found).isExecutable());
+}
+
+// Move and Delete run rclone with --stats, and the periodic block it prints
+// is what drives the bar. Before this the dialog showed a static label for the
+// whole operation, however long it ran.
+void TestWidgets::progressDialogTracksRcloneProgress() {
+  QObject owner;
+  ProgressDialog dialog("Move", "Moving...", "some/path",
+                        makeDeadProcess(&owner), nullptr, /*close=*/false);
+
+  auto *bar = dialog.findChild<QProgressBar *>("progressBar");
+  auto *detail = dialog.findChild<QLabel *>("progressDetail");
+  QVERIFY(bar != nullptr);
+  QVERIFY(detail != nullptr);
+  QVERIFY(bar->isHidden());
+
+  dialog.applyOutputLine(
+      "Transferred:   \t    3.027 MiB / 20 MiB, 15%, 3.027 MiB/s, ETA 5s");
+
+  QVERIFY(!bar->isHidden());
+  QCOMPARE(bar->value(), 15);
+  QVERIFY(detail->text().contains("3.027 MiB of 20 MiB"));
+  QVERIFY(detail->text().contains("ETA 5s"));
+
+  // No percentage yet -- rclone prints "-" until it knows the total -- shows
+  // the bar as busy rather than parking it at zero.
+  dialog.applyOutputLine("Transferred:   \t   65.489 MiB / 65.489 MiB, -, 0 B/s, ETA -");
+  QCOMPARE(bar->maximum(), 0);
+}
+
+void TestWidgets::progressDialogTracksResticProgress() {
+  QObject owner;
+  ProgressDialog dialog("Restore", "Restoring...", "whole snapshot",
+                        makeDeadProcess(&owner), nullptr, /*close=*/false);
+
+  auto *bar = dialog.findChild<QProgressBar *>("progressBar");
+  auto *detail = dialog.findChild<QLabel *>("progressDetail");
+  auto *output = dialog.findChild<QPlainTextEdit *>("output");
+  QVERIFY(bar != nullptr && detail != nullptr && output != nullptr);
+
+  dialog.applyOutputLine(
+      R"({"message_type":"status","percent_done":0.446989917755127,"total_files":7,"files_restored":2,"total_bytes":125829120,"bytes_restored":56244348})");
+
+  QVERIFY(!bar->isHidden());
+  QCOMPARE(bar->value(), 45);
+  QVERIFY(detail->text().contains("2 of 7 files"));
+
+  // The JSON itself must not reach the output pane: there is one record a
+  // second and it would be the only thing in there.
+  QVERIFY(!output->toPlainText().contains("message_type"));
+
+  dialog.applyOutputLine(
+      R"({"message_type":"summary","total_files":7,"files_restored":7,"total_bytes":125829120,"bytes_restored":125829120})");
+  QCOMPARE(bar->value(), 100);
+  QVERIFY(output->toPlainText().contains("Restored 7 of 7 files"));
+}
+
+void TestWidgets::progressDialogStaysBareWithoutProgress() {
+  // New Folder and Rename report nothing and finish at once; their dialog
+  // should look exactly as it always has.
+  QObject owner;
+  ProgressDialog dialog("New Folder", "Creating...", "some/path",
+                        makeDeadProcess(&owner), nullptr, /*close=*/false);
+
+  auto *bar = dialog.findChild<QProgressBar *>("progressBar");
+  QVERIFY(bar != nullptr);
+
+  dialog.applyOutputLine("2026/08/17 15:49:23 NOTICE: something happened");
+  QVERIFY(bar->isHidden());
+
+  auto *output = dialog.findChild<QPlainTextEdit *>("output");
+  QVERIFY(output->toPlainText().contains("something happened"));
+}
+
+void TestWidgets::jobWidgetReportsFailure() {
+  // Running a task reported nothing either way: the finished signal carried
+  // only a description, so a job that failed notified in the same words as one
+  // that worked, and the output explaining it stayed collapsed.
+  //
+  // This test binary stands in for a failing rclone -- asked for a test
+  // function that does not exist it prints a complaint and exits 1, which is
+  // as portable as the process under test.
+  auto *process = new QProcess();
+  process->setProgram(QCoreApplication::applicationFilePath());
+  process->setArguments({"rrm-no-such-test-function"});
+
+  JobWidget widget(process, "Copy something", {"copy"}, "src", "dst");
+  QSignalSpy finished(&widget, &JobWidget::finished);
+
+  // The widget watches the process; starting it is the caller's job, exactly
+  // as MainWindow::addTransfer does it.
+  process->start(QIODevice::ReadOnly);
+
+  QTRY_VERIFY_WITH_TIMEOUT(finished.count() == 1, 15000);
+  QCOMPARE(finished.first().at(1).toBool(), false);
+  QVERIFY(!widget.wasCancelled());
+
+  // The log is opened for a failure, so what went wrong is on screen.
+  auto *output = widget.findChild<QPlainTextEdit *>("output");
+  QVERIFY(output != nullptr);
+  QVERIFY(!output->isHidden());
+
+  QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }
 
 QTEST_MAIN(TestWidgets)

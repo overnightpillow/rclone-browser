@@ -148,6 +148,7 @@ MainWindow::MainWindow() {
       settings->setValue("Settings/rclone", dialog.getRclone().trimmed());
       settings->setValue("Settings/rcloneConf",
                          dialog.getRcloneConf().trimmed());
+      SetRestic(dialog.getRestic());
       settings->setValue("Settings/stream", dialog.getStream());
       settings->setValue("Settings/mount", dialog.getMount());
       settings->setValue("Settings/defaultDownloadDir",
@@ -381,7 +382,7 @@ MainWindow::MainWindow() {
 
   QString rclone = GetRclone();
   if (rclone.isEmpty()) {
-    rclone = QStandardPaths::findExecutable("rclone");
+    rclone = FindHelperExecutable("rclone");
     if (rclone.isEmpty()) {
       QMessageBox::information(
           this, "Error",
@@ -1277,6 +1278,28 @@ void MainWindow::listTasks() {
   }
 }
 
+void MainWindow::notify(const QString &title, const QString &message) {
+  if (!QSystemTrayIcon::supportsMessages()) {
+    return;
+  }
+
+  if (!mSystemTray.isVisible()) {
+    mSystemTray.setVisible(true);
+
+    // Long enough for the notification to be delivered and read; hiding the
+    // icon straight away takes the notification with it.
+    QTimer::singleShot(15000, this, [this]() {
+      // Not while the window is hidden to the tray: that icon is the only way
+      // back to the application.
+      if (isVisible()) {
+        mSystemTray.setVisible(mAlwaysShowInTray);
+      }
+    });
+  }
+
+  mSystemTray.showMessage(title, message);
+}
+
 void MainWindow::runItem(JobOptionsListWidgetItem *item, bool dryrun) {
   if (item == nullptr)
     return;
@@ -1285,6 +1308,11 @@ void MainWindow::runItem(JobOptionsListWidgetItem *item, bool dryrun) {
   QStringList args = jo->getOptions();
   addTransfer(QString("%1 %2").arg(jo->operation).arg(jo->source), jo->source,
               jo->dest, args);
+
+  // Running a task left the user looking at the task list, where nothing
+  // happens: the job, its progress and its output are all on the Jobs tab,
+  // and the only hint was the count in that tab's title.
+  ui.tabs->setCurrentIndex(1);
 }
 
 void MainWindow::editSelectedTask() {
@@ -1319,11 +1347,20 @@ void MainWindow::addTransfer(const QString &message, const QString &source,
   line->setFrameShadow(QFrame::Sunken);
 
   QObject::connect(
-      widget, &JobWidget::finished, this, [=](const QString &info) {
-        if (mNotifyFinishedTransfers) {
-          qApp->alert(this);
-          mLastFinished = widget;
-          mSystemTray.showMessage("Transfer finished", info);
+      widget, &JobWidget::finished, this, [=](const QString &info,
+                                              bool success) {
+        // A cancelled job is not news: the user just asked for it, and the row
+        // is about to remove itself.
+        if (!widget->wasCancelled()) {
+          const QString what = success ? "finished" : "failed";
+          ui.statusBar->showMessage(QString("Transfer %1: %2").arg(what, info),
+                                    15000);
+
+          if (mNotifyFinishedTransfers) {
+            qApp->alert(this);
+            mLastFinished = widget;
+            notify(success ? "Transfer finished" : "Transfer failed", info);
+          }
         }
 
         if (--mJobCount == 0) {

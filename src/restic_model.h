@@ -102,5 +102,12 @@ private:
   void clearChildren(const QPersistentModelIndex &parentIndex,
                      ResticItem *parent);
 
-  QProcess *startRestic(const QStringList &args);
+  // Runs restic and calls done() exactly once, whether the process failed to
+  // start, died, exited non-zero or succeeded. Going through one place is what
+  // keeps a missing restic binary from leaving a "loading" row forever: a
+  // process that never starts never emits finished().
+  void runRestic(const QStringList &args,
+                 std::function<void(bool ok, const QString &error,
+                                    const QByteArray &output)>
+                     done);
 };

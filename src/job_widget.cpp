@@ -81,7 +81,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   QObject::connect(mProcess,
                    &QProcess::finished,
-                   this, [=](int status, QProcess::ExitStatus) {
+                   this, [=](int code, QProcess::ExitStatus status) {
                      mProcess->deleteLater();
                      for (auto label : mActive) {
                        ui.progress->removeWidget(label->buddy());
@@ -90,8 +90,13 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
                        delete label;
                      }
 
+                     // A crash counts as a failure too: the old test looked at
+                     // the exit code alone, which is 0 for a killed process.
+                     const bool success =
+                         status == QProcess::NormalExit && code == 0;
+
                      mRunning = false;
-                     if (status == 0) {
+                     if (success) {
                        ui.showDetails->setStyleSheet(
                            "QToolButton { border: 0; color: black; }");
                        ui.showDetails->setText("Finished");
@@ -99,11 +104,19 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
                        ui.showDetails->setStyleSheet(
                            "QToolButton { border: 0; color: red; }");
                        ui.showDetails->setText("Error");
+
+                       // What went wrong is in the output, and a job that
+                       // failed is exactly when nobody wants to go hunting for
+                       // the disclosure triangle. Cancelling is not a failure
+                       // to explain -- that row is about to close anyway.
+                       if (!mCancelled) {
+                         ui.showOutput->setChecked(true);
+                       }
                      }
 
                      ui.cancel->setToolTip("Close");
 
-                     emit finished(ui.info->text());
+                     emit finished(ui.info->text(), success);
 
                      // A cancelled job closes its row once the process is
                      // actually gone, which is what makes cancel() able to
