@@ -39,6 +39,7 @@ set(HEADERS
   restic.h
   formatting.h
   parsing.h
+  remote_path.h
   theme.h
 )
 
@@ -60,6 +61,7 @@ set(SOURCES
   list_of_job_options.cpp
   formatting.cpp
   parsing.cpp
+  remote_path.cpp
   theme.cpp
   restic.cpp
   restic_model.cpp

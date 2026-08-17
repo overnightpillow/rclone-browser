@@ -1,7 +1,7 @@
 #include "export_dialog.h"
 #include "utils.h"
 
-ExportDialog::ExportDialog(const QString &remote, const QDir &path,
+ExportDialog::ExportDialog(const QString &remote, const QString &path,
                            QWidget *parent)
     : QDialog(parent) {
   ui.setupUi(this);
@@ -9,7 +9,7 @@ ExportDialog::ExportDialog(const QString &remote, const QDir &path,
 
   setWindowTitle("Export files list");
 
-  mTarget = remote + ":" + path.path();
+  mTarget = remote + ":" + path;
 
   QObject::connect(ui.buttonBox->button(QDialogButtonBox::RestoreDefaults),
                    &QPushButton::clicked, this, [=]() {

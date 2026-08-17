@@ -35,6 +35,7 @@ private slots:
   void remoteWidgetSurvivesDestruction();
   void remoteWidgetGoogleVariantConstructs();
   void remoteWidgetAcceptsMultipleDroppedFiles();
+  void itemModelKeepsTheRemoteRootEmpty();
 
   void jobWidgetShowsStatsFromRcloneOutput();
 
@@ -211,6 +212,19 @@ void TestWidgets::remoteWidgetAcceptsMultipleDroppedFiles() {
 
   QCOMPARE(emissions, 1);
   QCOMPARE(dropped.size(), 3);
+}
+
+void TestWidgets::itemModelKeepsTheRemoteRootEmpty() {
+  // The root of a remote is the empty path. It was held in a QDir, which turns
+  // "" into ".", so the listing ran against "remote:." and every child below
+  // it was "./name" -- visible in the path line under the tree, and in the
+  // destination the transfer dialog offered.
+  ItemModel model(mIcons, "test-remote", nullptr);
+  const QModelIndex root = model.addRoot("test-remote:", QString());
+
+  QVERIFY(root.isValid());
+  QCOMPARE(model.path(root), QString());
+  QVERIFY(model.path(root) != QString("."));
 }
 
 void TestWidgets::jobWidgetShowsStatsFromRcloneOutput() {

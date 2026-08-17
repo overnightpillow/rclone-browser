@@ -1,4 +1,5 @@
 #include "parsing.h"
+#include "remote_path.h"
 #include "restic_model.h"
 #include <QtTest>
 
@@ -15,6 +16,11 @@ private slots:
   void rcloneMalformedJson();
   void rcloneNotAnArray();
   void rcloneAwkwardFilenames();
+  void rcloneListingCarriesPath();
+
+  void joinsRemotePaths();
+  void remotePathNames();
+  void childPathComesFromTheListing();
 
   void statsTotals();
   void statsTotalsBeforeRateIsKnown();
@@ -112,6 +118,77 @@ void TestParsing::rcloneAwkwardFilenames() {
   QCOMPARE(entries[0].name, QString("quote\"name.txt"));
   QCOMPARE(entries[1].name, QString("line\nbreak.txt"));
   QCOMPARE(entries[2].name, QString("  leading and trailing  "));
+}
+
+void TestParsing::rcloneListingCarriesPath() {
+  // lsjson reports a Path as well as a Name. They agree on ordinary backends,
+  // and the parser keeps both so the model can build a child path from what
+  // rclone said rather than by guessing.
+  const QByteArray json = R"([
+{"Path":"holiday/beach.jpg","Name":"beach.jpg","Size":12,"ModTime":"2026-08-15T06:15:00Z","IsDir":false},
+{"Name":"no-path-field.txt","Size":3,"ModTime":"2026-08-15T06:15:00Z","IsDir":false}
+])";
+
+  QVector<RcloneEntry> entries;
+  QVERIFY(ParseRcloneListing(json, &entries, nullptr));
+  QCOMPARE(entries.size(), 2);
+
+  QCOMPARE(entries[0].name, QString("beach.jpg"));
+  QCOMPARE(entries[0].path, QString("holiday/beach.jpg"));
+
+  // A backend that omits Path falls back to the name.
+  QCOMPARE(entries[1].path, QString("no-path-field.txt"));
+}
+
+void TestParsing::joinsRemotePaths() {
+  QCOMPARE(JoinRemotePath("photos", "beach.jpg"),
+           QString("photos/beach.jpg"));
+  QCOMPARE(JoinRemotePath("photos/2026", "beach.jpg"),
+           QString("photos/2026/beach.jpg"));
+
+  // The root of a remote is the empty path, and this is the whole reason the
+  // helper exists: QDir turns "" into ".", so the root of every remote listed
+  // as "./name" and the destination fields showed "remote:." to the user.
+  QCOMPARE(JoinRemotePath("", "beach.jpg"), QString("beach.jpg"));
+  QCOMPARE(JoinRemotePath(".", "beach.jpg"), QString("beach.jpg"));
+
+  // No doubled separator when the parent already ends in one.
+  QCOMPARE(JoinRemotePath("photos/", "beach.jpg"),
+           QString("photos/beach.jpg"));
+
+  // Names are not interpreted. A remote may hold an object literally called
+  // "..", and on Windows QDir would have treated the backslash as a separator.
+  QCOMPARE(JoinRemotePath("photos", ".."), QString("photos/.."));
+  QCOMPARE(JoinRemotePath("photos", "a\\b"), QString("photos/a\\b"));
+  QCOMPARE(JoinRemotePath("photos", "a b"), QString("photos/a b"));
+
+  QCOMPARE(JoinRemotePath("photos", QString()), QString("photos"));
+}
+
+void TestParsing::remotePathNames() {
+  QCOMPARE(RemotePathName("photos/2026/beach.jpg"), QString("beach.jpg"));
+  QCOMPARE(RemotePathName("photos"), QString("photos"));
+  QCOMPARE(RemotePathName("photos/"), QString("photos"));
+  // The root has no name of its own.
+  QCOMPARE(RemotePathName(""), QString());
+}
+
+void TestParsing::childPathComesFromTheListing() {
+  // The ordinary case: Path is the name again, so the child sits under its
+  // parent.
+  QCOMPARE(ChildRemotePath("holiday", "beach.jpg", "beach.jpg"),
+           QString("holiday/beach.jpg"));
+  QCOMPARE(ChildRemotePath("", "beach.jpg", "beach.jpg"),
+           QString("beach.jpg"));
+
+  // Where a backend reports a Path that already includes the parent -- Google
+  // Photos album listings do -- it must not be joined on a second time.
+  QCOMPARE(ChildRemotePath("album", "album/beach.jpg", "beach.jpg"),
+           QString("album/beach.jpg"));
+
+  // No Path at all: fall back to the name.
+  QCOMPARE(ChildRemotePath("holiday", QString(), "beach.jpg"),
+           QString("holiday/beach.jpg"));
 }
 
 // The stats fixtures below are byte-for-byte lines from rclone 1.71, tab and

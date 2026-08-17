@@ -268,7 +268,7 @@ MainWindow::MainWindow() {
     //
     // Same dialog, opened with no remote context: it starts blank and the
     // user fills in both sides.
-    TransferDialog dialog(false, false, QString(), QDir(), true, this);
+    TransferDialog dialog(false, false, QString(), QString(), true, this);
     dialog.exec();
   });
 

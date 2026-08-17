@@ -12,7 +12,8 @@ public:
   // box. It used to be read from a global setting that any other tab could
   // have changed between opening this dialog and running the job.
   TransferDialog(bool isDownload, bool isDrop, const QString &remote,
-                 const QDir &path, bool isFolder, QWidget *parent = nullptr,
+                 const QString &path, bool isFolder,
+                 QWidget *parent = nullptr,
                  JobOptions *task = nullptr, bool editMode = false,
                  bool driveShared = false);
   ~TransferDialog();

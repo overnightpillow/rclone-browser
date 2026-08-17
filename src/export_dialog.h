@@ -7,7 +7,7 @@ class ExportDialog : public QDialog {
   Q_OBJECT
 
 public:
-  ExportDialog(const QString &remote, const QDir &path,
+  ExportDialog(const QString &remote, const QString &path,
                QWidget *parent = nullptr);
   ~ExportDialog();
 

@@ -1,9 +1,10 @@
 #include "transfer_dialog.h"
+#include "remote_path.h"
 #include "list_of_job_options.h"
 #include "utils.h"
 
 TransferDialog::TransferDialog(bool isDownload, bool isDrop,
-                               const QString &remote, const QDir &path,
+                               const QString &remote, const QString &path,
                                bool isFolder, QWidget *parent, JobOptions *task,
                                bool editMode, bool driveShared)
     : QDialog(parent), mIsDownload(isDownload), mIsFolder(isFolder),
@@ -112,7 +113,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
     QString file = QFileDialog::getOpenFileName(this, "Choose file to upload");
     if (!file.isEmpty()) {
       ui.textSource->setText(QDir::toNativeSeparators(file));
-      ui.textDest->setText(remote + ":" + path.path());
+      ui.textDest->setText(remote + ":" + path);
     }
   });
 
@@ -128,7 +129,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       settings->setValue("Settings/lastUsedSourceFolder", folder);
       ui.textSource->setText(QDir::toNativeSeparators(folder));
       ui.textDest->setText(remote + ":" +
-                           path.filePath(QFileInfo(folder).fileName()));
+                           JoinRemotePath(path, QFileInfo(folder).fileName()));
     }
   });
 
@@ -141,9 +142,9 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
     ui.textSource->setText(QDir::toNativeSeparators(default_folder));
     if (!default_folder.isEmpty()) {
       ui.textDest->setText(remote + ":" +
-                           path.filePath(QFileInfo(default_folder).fileName()));
+                           JoinRemotePath(path, QFileInfo(default_folder).fileName()));
     } else {
-      ui.textDest->setText(remote + ":" + path.path());
+      ui.textDest->setText(remote + ":" + path);
     };
   });
 
@@ -159,7 +160,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       settings->setValue("Settings/lastUsedDestFolder", folder);
       if (isFolder) {
         ui.textDest->setText(
-            QDir::toNativeSeparators(folder + "/" + path.dirName()));
+            QDir::toNativeSeparators(folder + "/" + RemotePathName(path)));
       } else {
         ui.textDest->setText(QDir::toNativeSeparators(folder));
       }
@@ -175,7 +176,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
     if (!default_folder.isEmpty()) {
       if (isFolder) {
         ui.textDest->setText(
-            QDir::toNativeSeparators(default_folder + "/" + path.dirName()));
+            QDir::toNativeSeparators(default_folder + "/" + RemotePathName(path)));
       } else {
         ui.textDest->setText(QDir::toNativeSeparators(default_folder));
       }
@@ -228,7 +229,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       // download
       ui.textExtra->setText(
           settings->value("Settings/defaultDownloadOptions").toString());
-      ui.textSource->setText(remote + ":" + path.path());
+      ui.textSource->setText(remote + ":" + path);
       QString folder;
       QString default_folder =
           (settings->value("Settings/defaultDownloadDir").toString());
@@ -244,7 +245,7 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
       if (!folder.isEmpty()) {
         if (isFolder) {
           ui.textDest->setText(
-              QDir::toNativeSeparators(folder + "/" + path.dirName()));
+              QDir::toNativeSeparators(folder + "/" + RemotePathName(path)));
         } else {
           ui.textDest->setText(QDir::toNativeSeparators(folder));
         }
@@ -272,16 +273,18 @@ TransferDialog::TransferDialog(bool isDownload, bool isDrop,
         ui.textSource->setText(QDir::toNativeSeparators(folder));
         if (!folder.isEmpty()) {
           ui.textDest->setText(remote + ":" +
-                               path.filePath(QFileInfo(folder).fileName()));
+                               JoinRemotePath(path, QFileInfo(folder).fileName()));
         } else {
-          ui.textDest->setText(remote + ":" + path.path());
+          ui.textDest->setText(remote + ":" + path);
         }
       } else {
-        // when dropping to root folder
-        if (path.path() == ".") {
+        // The root of a remote is the empty path. It used to arrive here as
+        // ".", because QDir turns an empty path into one, and this compared
+        // against that instead.
+        if (path.isEmpty()) {
           ui.textDest->setText(remote + ":");
         } else {
-          ui.textDest->setText(remote + ":" + path.path());
+          ui.textDest->setText(remote + ":" + path);
         }
       };
     };

@@ -2,6 +2,7 @@
 #include "formatting.h"
 #include "icon_cache.h"
 #include "parsing.h"
+#include "remote_path.h"
 #include "theme.h"
 #include "utils.h"
 #include <algorithm>
@@ -112,7 +113,7 @@ ItemModel::ItemModel(IconCache *icons, const QString &remote, QObject *parent)
 
 ItemModel::~ItemModel() { delete mRoot; }
 
-const QDir &ItemModel::path(const QModelIndex &index) const {
+const QString &ItemModel::path(const QModelIndex &index) const {
   return get(index)->path;
 }
 
@@ -132,7 +133,7 @@ void ItemModel::refresh(const QModelIndex &index) {
 void ItemModel::rename(const QModelIndex &index, const QString &name) {
   Item *item = get(index);
   item->name = name;
-  item->path.setPath(item->parent->path.filePath(item->name));
+  item->path = JoinRemotePath(item->parent->path, item->name);
   emit dataChanged(index, index, QVector<int>{Qt::DisplayRole});
 }
 
@@ -150,7 +151,7 @@ QModelIndex ItemModel::addRoot(const QString &name, const QString &path) {
   Item *item = new Item();
   item->isFolder = true;
   item->name = name;
-  item->path.setPath(path);
+  item->path = path;
   item->parent = mRoot;
   mRoot->childs.append(item);
 
@@ -442,6 +443,7 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
           child->parent = parent;
           child->isFolder = entry.isFolder;
           child->name = entry.name;
+          child->entryPath = entry.path;
           child->modified = entry.modified;
           child->size = entry.size;
 
@@ -500,7 +502,10 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
     for (auto &item : *cache) {
       auto it = existing.find(item->name);
       if (it == existing.end()) {
-        item->path.setPath(parent->path.filePath(item->name));
+        // Set from the listing rather than rebuilt from the name; see
+        // ChildRemotePath.
+        item->path = ChildRemotePath(parent->path, item->entryPath,
+                                     item->name);
         if (!item->isFolder && mFileIcons) {
           QString ext = QFileInfo(item->name).suffix();
           if (!mLoadedIcons.contains(ext)) {
@@ -568,7 +573,7 @@ void ItemModel::load(const QPersistentModelIndex &parentIndex, Item *parent) {
             QStringList() << "lsjson" << GetRcloneConf()
                           << driveSharedWithMeArgs() << GetShowHidden()
                           << GetDefaultRcloneOptionsList()
-                          << mRemote + ":" + parent->path.path(),
+                          << mRemote + ":" + parent->path,
             QIODevice::ReadOnly);
 }
 

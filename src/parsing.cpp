@@ -130,6 +130,10 @@ bool ParseRcloneListing(const QByteArray &json, QVector<RcloneEntry> *entries,
     RcloneEntry entry;
     entry.isFolder = object.value("IsDir").toBool();
     entry.name = object.value("Name").toString();
+    entry.path = object.value("Path").toString();
+    if (entry.path.isEmpty()) {
+      entry.path = entry.name;
+    }
     entry.modified = FormatModTime(object.value("ModTime").toString());
 
     if (!entry.isFolder) {

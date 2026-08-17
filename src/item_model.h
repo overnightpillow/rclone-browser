@@ -32,7 +32,12 @@ struct Item {
   bool isFolder = false;
   bool isDeleted = false;
   QString name;
-  QDir path;
+  // A remote path, not a filesystem path: see remote_path.h for why this is
+  // not a QDir. Empty means the root of the remote.
+  QString path;
+  // The Path this entry carried in the listing it came from, kept until the
+  // item is placed so its path can be built from what rclone reported.
+  QString entryPath;
   QString modified;
   quint64 size = 0;
 
@@ -48,7 +53,7 @@ public:
   ItemModel(IconCache *icons, const QString &remote, QObject *parent);
   ~ItemModel();
 
-  const QDir &path(const QModelIndex &index) const;
+  const QString &path(const QModelIndex &index) const;
   bool isLoading(const QModelIndex &index) const;
   void refresh(const QModelIndex &index);
   void rename(const QModelIndex &index, const QString &name);

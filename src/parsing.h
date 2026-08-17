@@ -9,6 +9,10 @@
 // One entry of an "rclone lsjson" listing.
 struct RcloneEntry {
   QString name;
+  // Path as rclone reports it, relative to the directory that was listed.
+  // Usually the name again, but not on every backend -- see ChildRemotePath in
+  // remote_path.h. Falls back to the name when the backend omits it.
+  QString path;
   bool isFolder = false;
   quint64 size = 0;
   // Already formatted for display; empty when the backend has no timestamp.

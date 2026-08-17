@@ -4,6 +4,7 @@
 #include "item_model.h"
 #include "list_of_job_options.h"
 #include "progress_dialog.h"
+#include "remote_path.h"
 #include "transfer_dialog.h"
 #include "utils.h"
 
@@ -146,7 +147,7 @@ QString root = isLocal ? "/" : QString();
         bool topLevel = model->isTopLevel(index);
         bool isFolder = model->isFolder(index);
 
-        QDir path;
+        QString path;
         if (model->isLoading(index)) {
           ui.refresh->setDisabled(true);
           ui.move->setDisabled(true);
@@ -193,8 +194,7 @@ QString root = isLocal ? "/" : QString();
         ui.getSize->setDisabled(!isFolder);
         ui.getTree->setDisabled(!isFolder);
         ui.export_->setDisabled(!isFolder);
-        const QString shown =
-            isLocal ? QDir::toNativeSeparators(path.path()) : path.path();
+        const QString shown = isLocal ? QDir::toNativeSeparators(path) : path;
         // With nothing selected the path is empty, which collapsed the footer
         // to a blank line and left this tab looking structurally different
         // from the restic one. Fall back to naming the remote.
@@ -214,13 +214,15 @@ QString root = isLocal ? "/" : QString();
     if (!model->isFolder(index)) {
       index = index.parent();
     }
-    QDir path = model->path(index);
-    QString pathMsg =
-        isLocal ? QDir::toNativeSeparators(path.path()) : path.path();
+    const QString path = model->path(index);
+    QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
     QString name = QInputDialog::getText(
         this, "New Folder", QString("Create folder in %1").arg(pathMsg));
     if (!name.isEmpty()) {
-      QString folder = path.filePath(name);
+      // QDir for a real filesystem, the remote join for a remote: the two
+      // disagree about an empty parent, which is exactly the root of a remote.
+      QString folder = isLocal ? QDir(path).filePath(name)
+                               : JoinRemotePath(path, name);
       QString folderMsg = isLocal ? QDir::toNativeSeparators(folder) : folder;
 
       QProcess process;
@@ -244,7 +246,7 @@ QString root = isLocal ? "/" : QString();
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
     QString name = model->data(index, Qt::DisplayRole).toString();
@@ -259,7 +261,8 @@ QString root = isLocal ? "/" : QString();
           QStringList() << "moveto" << GetRcloneConf() << driveSharedArgs()
                         << GetDefaultRcloneOptionsList() << remote + ":" + path
                         << remote + ":" +
-                               model->path(index.parent()).filePath(name));
+                               JoinRemotePath(model->path(index.parent()),
+                                              name));
       process.setProcessChannelMode(QProcess::MergedChannels);
 
       ProgressDialog progress("Rename", "Renaming...", pathMsg, &process, this);
@@ -273,7 +276,7 @@ QString root = isLocal ? "/" : QString();
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
     // The prompt asks for the full destination path, and is seeded with the
@@ -308,7 +311,7 @@ QString root = isLocal ? "/" : QString();
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
     int button = QMessageBox::question(
@@ -341,7 +344,7 @@ QString root = isLocal ? "/" : QString();
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
 #if defined(Q_OS_WIN32)
@@ -365,7 +368,7 @@ QString root = isLocal ? "/" : QString();
     auto settings = GetSettings();
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
-    QString path = model->path(index).path();
+    QString path = model->path(index);
 
     bool streamConfirmed =
         settings->value("Settings/streamConfirmed", false).toBool();
@@ -414,7 +417,7 @@ QString root = isLocal ? "/" : QString();
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
     QProcess process;
@@ -438,7 +441,7 @@ QString root = isLocal ? "/" : QString();
     if (!model->isFolder(index)) {
       index = index.parent();
     }
-    QDir path = model->path(index);
+    const QString path = model->path(index);
 
     TransferDialog t(false, false, remote, path, true, this, nullptr,
                      false, ui.checkBoxShared->isChecked());
@@ -455,7 +458,7 @@ QString root = isLocal ? "/" : QString();
   QObject::connect(ui.download, &QAction::triggered, this, [=]() {
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
-    QDir path = model->path(index);
+    const QString path = model->path(index);
 
     TransferDialog t(true, false, remote, path, model->isFolder(index), this,
                      nullptr, false, ui.checkBoxShared->isChecked());
@@ -472,7 +475,7 @@ QString root = isLocal ? "/" : QString();
   QObject::connect(ui.getTree, &QAction::triggered, this, [=]() {
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
     QProcess process;
@@ -494,7 +497,7 @@ QString root = isLocal ? "/" : QString();
   QObject::connect(ui.getSize, &QAction::triggered, this, [=]() {
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
 
-    QString path = model->path(index).path();
+    QString path = model->path(index);
     QString pathMsg = isLocal ? QDir::toNativeSeparators(path) : path;
 
     QProcess process;
@@ -514,7 +517,7 @@ QString root = isLocal ? "/" : QString();
   QObject::connect(ui.export_, &QAction::triggered, this, [=]() {
 
     QModelIndex index = ui.tree->selectionModel()->selectedRows().front();
-    QDir path = model->path(index);
+    const QString path = model->path(index);
     ExportDialog e(remote, path, this);
     if (e.exec() == QDialog::Accepted) {
       QString dst = e.getDestination();
@@ -579,15 +582,18 @@ QString root = isLocal ? "/" : QString();
         }
 
         this->activateWindow();
-        const QDir destPath = model->path(parent);
+        const QString destPath = model->path(parent);
 
         // A folder is uploaded into a folder of its own name, so that dropping
         // "photos" produces "photos" at the destination rather than emptying
         // its contents into the target. A file goes straight in.
-        auto destinationFor = [](const QDir &base, const QDir &source) {
+        //
+        // The source is a local path and the destination a remote one, so the
+        // two sides are built with different tools on purpose.
+        auto destinationFor = [](const QString &base, const QDir &source) {
           return QFileInfo(source.path()).isDir()
-                     ? base.filePath(source.dirName())
-                     : base.path();
+                     ? JoinRemotePath(base, source.dirName())
+                     : base;
         };
 
         // One dialog for the whole drop. With several items the destination
@@ -595,7 +601,7 @@ QString root = isLocal ? "/" : QString();
         // destination, as it has always been.
         const bool single = paths.size() == 1;
         const QString dialogDest =
-            single ? destinationFor(destPath, paths.first()) : destPath.path();
+            single ? destinationFor(destPath, paths.first()) : destPath;
 
         TransferDialog t(false, true, remote, dialogDest, true, this, nullptr,
                          false, ui.checkBoxShared->isChecked());
@@ -619,9 +625,7 @@ QString root = isLocal ? "/" : QString();
 
         for (const QDir &path : paths) {
           options.source = single ? t.getSource() : path.path();
-          options.dest =
-              single ? chosenDest
-                     : destinationFor(QDir(chosenDest), path);
+          options.dest = single ? chosenDest : destinationFor(chosenDest, path);
 
           emit addTransfer(
               QString("%1 from %2").arg(t.getMode()).arg(options.source),
@@ -666,10 +670,10 @@ QString root = isLocal ? "/" : QString();
 
         if (chosen != nullptr && chosen == openRestic) {
           emit this->openRestic(remote,
-                                model->path(selected.front()).path());
+                                model->path(selected.front()));
         } else if (chosen != nullptr && chosen == saveRestic) {
           emit this->saveRestic(remote,
-                                model->path(selected.front()).path());
+                                model->path(selected.front()));
         }
       });
 
