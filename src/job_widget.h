@@ -14,6 +14,10 @@ public:
 
   void showDetails();
 
+  // Applies one line of rclone output to the panel. Public so the panel can be
+  // driven from a test without a process behind it.
+  void applyOutputLine(const QString &line);
+
 public slots:
   void cancel();
 

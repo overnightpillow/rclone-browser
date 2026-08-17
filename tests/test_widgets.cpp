@@ -38,6 +38,7 @@ private slots:
   void itemModelKeepsTheRemoteRootEmpty();
 
   void jobWidgetShowsStatsFromRcloneOutput();
+  void jobWidgetCancelDoesNotBlock();
 
   void resticWidgetConstructs();
   void resticWidgetSurvivesDestruction();
@@ -229,36 +230,35 @@ void TestWidgets::itemModelKeepsTheRemoteRootEmpty() {
 
 void TestWidgets::jobWidgetShowsStatsFromRcloneOutput() {
   // The end of the wiring that test_parsing covers from the other end: real
-  // rclone 1.71 output arriving on a process, and the Jobs panel's fields
-  // actually filling in. Every one of these was blank for the whole life of
-  // the 1.56 output format.
+  // rclone 1.71 output, and the Jobs panel's fields actually filling in. Every
+  // one of these was blank for the whole life of the 1.56 output format.
+  //
+  // The lines are handed to the widget directly rather than piped in from a
+  // process. The first version of this test ran /bin/sh to play the part of
+  // rclone, which worked everywhere except the one platform that had never
+  // compiled the code -- Windows has no /bin/sh, and the test failed there the
+  // moment a Windows runner existed to run it.
   auto *process = new QProcess();
-  process->setProcessChannelMode(QProcess::MergedChannels);
-
   JobWidget widget(process, "Copy", QStringList() << "copy", "src", "dest");
 
-  // A shell standing in for rclone: one captured stats block, then a wait, so
-  // that the job is still running while the panel is inspected. The per-file
-  // rows are cleared when the process exits, as they are for a real job.
-  process->start("/bin/sh",
-                 {"-c",
-                  "printf '%s\\n' "
-                  "'Transferred:   \t    3.027 MiB / 120 MiB, 3%, 3.027 MiB/s, "
-                  "ETA 38s' "
-                  "'Errors:                 1 (retrying may help)' "
-                  "'Checks:                 0 / 0, -, Listed 1' "
-                  "'Transferred:            0 / 1, 0%' "
-                  "'Elapsed time:         1.9s' "
-                  "' *                                       big.bin:  3% "
-                  "/120Mi, 2.027Mi/s, 57s'; sleep 30"});
-  QVERIFY(process->waitForStarted());
+  const QStringList output = {
+      "Transferred:   \t    3.027 MiB / 120 MiB, 3%, 3.027 MiB/s, ETA 38s",
+      "Errors:                 1 (retrying may help)",
+      "Checks:                 0 / 0, -, Listed 1",
+      "Transferred:            0 / 1, 0%",
+      "Elapsed time:         1.9s",
+      "*                                       big.bin:  3% /120Mi, 2.027Mi/s, 57s",
+  };
+  for (const QString &line : output) {
+    widget.applyOutputLine(line);
+  }
 
   auto field = [&widget](const char *name) {
     auto *edit = widget.findChild<QLineEdit *>(name);
     return edit ? edit->text() : QString("<missing>");
   };
 
-  QTRY_COMPARE(field("size"), QString("3.027 MiB, 3%"));
+  QCOMPARE(field("size"), QString("3.027 MiB, 3%"));
   QCOMPARE(field("totalsize"), QString("120 MiB"));
   QCOMPARE(field("bandwidth"), QString("3.027 MiB/s"));
   QCOMPARE(field("eta"), QString("38s"));
@@ -270,18 +270,47 @@ void TestWidgets::jobWidgetShowsStatsFromRcloneOutput() {
   // The per-file line adds a progress bar for that file. The old pattern
   // rejected the "0/s, -" that rclone prints before it has a rate, so a bar
   // appeared only once the transfer was properly under way.
-  QTRY_VERIFY(widget.findChild<QProgressBar *>() != nullptr);
-  QCOMPARE(widget.findChild<QProgressBar *>()->value(), 3);
+  auto *bar = widget.findChild<QProgressBar *>();
+  QVERIFY(bar != nullptr);
+  QCOMPARE(bar->value(), 3);
 
+  // A blank line ends a stats block, and any file not mentioned in the block
+  // just gone has finished: its row goes away.
+  widget.applyOutputLine(QString());
+  widget.applyOutputLine(QString());
+  QVERIFY(widget.findChild<QProgressBar *>() == nullptr);
+
+  delete process;
+}
+
+void TestWidgets::jobWidgetCancelDoesNotBlock() {
   // Cancelling asks the process to stop and returns immediately: it used to
-  // kill outright and then block the GUI on waitForFinished().
+  // send SIGKILL and then block the GUI on waitForFinished().
   //
-  // Guarded, because the widget deletes the process once it exits, and the
-  // event loop this waits on is what delivers that deletion.
+  // cmake stands in for a long-running rclone because it is guaranteed to be
+  // here -- it built this test -- and it behaves the same on every platform,
+  // which /bin/sh does not.
+  auto *process = new QProcess();
+  JobWidget widget(process, "Copy", QStringList() << "copy", "src", "dest");
+
+  process->start(RRM_CMAKE_COMMAND, {"-E", "sleep", "30"});
+  QVERIFY(process->waitForStarted());
+
+  QElapsedTimer timer;
+  timer.start();
+
+  // Guarded: the widget deletes the process once it exits, and the event loop
+  // this waits on is what delivers that deletion.
   QPointer<QProcess> running(process);
   widget.cancel();
-  QTRY_VERIFY_WITH_TIMEOUT(
-      !running || running->state() == QProcess::NotRunning, 6000);
+
+  // The point of the change: control comes back at once, rather than after
+  // however long the process takes to die.
+  QVERIFY2(timer.elapsed() < 1000,
+           qPrintable(QString("cancel() blocked for %1ms").arg(timer.elapsed())));
+
+  QTRY_VERIFY_WITH_TIMEOUT(!running || running->state() == QProcess::NotRunning,
+                           6000);
 
   QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
 }

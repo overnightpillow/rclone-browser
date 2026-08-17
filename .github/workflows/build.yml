@@ -65,6 +65,8 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # The windows job is the exception, and only lives here: Gitea's runners are
+  # Linux containers.
   windows:
     runs-on: windows-latest
     steps:
@@ -100,4 +102,15 @@ jobs:
           }
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        shell: pwsh
+        # Failures come back as annotations for the same reason the build step
+        # does it: the logs need a GitHub login, annotations do not.
+        run: |
+          ctest --test-dir build --output-on-failure 2>&1 |
+            Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) {
+            Select-String -Path test.log -Pattern 'FAIL!|Assertion|\(Failed\)' |
+              Select-Object -First 15 |
+              ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
+            exit 1
+          }

@@ -75,97 +75,7 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   QObject::connect(mProcess, &QProcess::readyRead, this, [=]() {
     while (mProcess->canReadLine()) {
-      QString line = mProcess->readLine().trimmed();
-      ui.output->appendPlainText(line);
-
-      if (line.isEmpty()) {
-        for (auto it = mActive.begin(), eit = mActive.end(); it != eit;
-             /* empty */) {
-          auto label = it.value();
-          if (mUpdated.contains(label)) {
-            ++it;
-          } else {
-            it = mActive.erase(it);
-            ui.progress->removeWidget(label->buddy());
-            ui.progress->removeWidget(label);
-            delete label->buddy();
-            delete label;
-          }
-        }
-        mUpdated.clear();
-        continue;
-      }
-
-      const RcloneStats stats = ParseRcloneStats(line);
-
-      switch (stats.kind) {
-      case RcloneStats::Unknown:
-        break;
-
-      case RcloneStats::Totals:
-        // Before 1.43 rclone reported only a running total and a rate, so the
-        // remaining fields keep whatever they last held rather than blinking
-        // empty.
-        ui.size->setText(stats.percent.isEmpty()
-                             ? stats.size
-                             : stats.size + ", " + stats.percent);
-        ui.bandwidth->setText(stats.bandwidth);
-        if (!stats.totalSize.isEmpty()) {
-          ui.totalsize->setText(stats.totalSize);
-        }
-        if (!stats.eta.isEmpty()) {
-          ui.eta->setText(stats.eta);
-        }
-        break;
-
-      case RcloneStats::Errors:
-        ui.errors->setText(stats.text);
-        break;
-
-      case RcloneStats::Checks:
-        ui.checks->setText(stats.text);
-        break;
-
-      case RcloneStats::FileCount:
-        ui.transferred->setText(stats.text);
-        break;
-
-      case RcloneStats::Elapsed:
-        ui.elapsed->setText(stats.text);
-        break;
-
-      case RcloneStats::FileProgress: {
-        auto it = mActive.find(stats.name);
-
-        QLabel *label;
-        QProgressBar *bar;
-        if (it == mActive.end()) {
-          label = new QLabel();
-          label->setText(elideName(stats.name));
-
-          bar = new QProgressBar();
-          bar->setMinimum(0);
-          bar->setMaximum(100);
-          bar->setTextVisible(true);
-
-          label->setBuddy(bar);
-
-          ui.progress->addRow(label, bar);
-
-          mActive.insert(stats.name, label);
-        } else {
-          label = it.value();
-          bar = static_cast<QProgressBar *>(label->buddy());
-        }
-
-        bar->setValue(stats.filePercent);
-        bar->setToolTip("File name: " + stats.name + "\nFile stats: " +
-                        stats.fileDetail);
-
-        mUpdated.insert(label);
-        break;
-      }
-      }
+      applyOutputLine(QString(mProcess->readLine()).trimmed());
     }
   });
 
@@ -205,6 +115,104 @@ JobWidget::JobWidget(QProcess *process, const QString &info,
 
   ui.showDetails->setStyleSheet("QToolButton { border: 0; color: green; }");
   ui.showDetails->setText("Running");
+}
+
+// One line of rclone's output, applied to the panel.
+//
+// Public, and separate from the readyRead handler, so the panel can be driven
+// from a test without spawning a process: the test used to run /bin/sh, which
+// is a thing Windows does not have.
+void JobWidget::applyOutputLine(const QString &line) {
+  ui.output->appendPlainText(line);
+
+  if (line.isEmpty()) {
+    for (auto it = mActive.begin(), eit = mActive.end(); it != eit;
+         /* empty */) {
+      auto label = it.value();
+      if (mUpdated.contains(label)) {
+        ++it;
+      } else {
+        it = mActive.erase(it);
+        ui.progress->removeWidget(label->buddy());
+        ui.progress->removeWidget(label);
+        delete label->buddy();
+        delete label;
+      }
+    }
+    mUpdated.clear();
+    return;
+  }
+
+  const RcloneStats stats = ParseRcloneStats(line);
+
+  switch (stats.kind) {
+  case RcloneStats::Unknown:
+    break;
+
+  case RcloneStats::Totals:
+    // Before 1.43 rclone reported only a running total and a rate, so the
+    // remaining fields keep whatever they last held rather than blinking
+    // empty.
+    ui.size->setText(stats.percent.isEmpty()
+                         ? stats.size
+                         : stats.size + ", " + stats.percent);
+    ui.bandwidth->setText(stats.bandwidth);
+    if (!stats.totalSize.isEmpty()) {
+      ui.totalsize->setText(stats.totalSize);
+    }
+    if (!stats.eta.isEmpty()) {
+      ui.eta->setText(stats.eta);
+    }
+    break;
+
+  case RcloneStats::Errors:
+    ui.errors->setText(stats.text);
+    break;
+
+  case RcloneStats::Checks:
+    ui.checks->setText(stats.text);
+    break;
+
+  case RcloneStats::FileCount:
+    ui.transferred->setText(stats.text);
+    break;
+
+  case RcloneStats::Elapsed:
+    ui.elapsed->setText(stats.text);
+    break;
+
+  case RcloneStats::FileProgress: {
+    auto it = mActive.find(stats.name);
+
+    QLabel *label;
+    QProgressBar *bar;
+    if (it == mActive.end()) {
+      label = new QLabel();
+      label->setText(elideName(stats.name));
+
+      bar = new QProgressBar();
+      bar->setMinimum(0);
+      bar->setMaximum(100);
+      bar->setTextVisible(true);
+
+      label->setBuddy(bar);
+
+      ui.progress->addRow(label, bar);
+
+      mActive.insert(stats.name, label);
+    } else {
+      label = it.value();
+      bar = static_cast<QProgressBar *>(label->buddy());
+    }
+
+    bar->setValue(stats.filePercent);
+    bar->setToolTip("File name: " + stats.name + "\nFile stats: " +
+                    stats.fileDetail);
+
+    mUpdated.insert(label);
+    break;
+  }
+  }
 }
 
 JobWidget::~JobWidget() {}

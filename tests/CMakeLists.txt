@@ -31,6 +31,10 @@ function(rrm_add_test NAME)
 
   target_compile_definitions(${NAME} PRIVATE
     RCLONE_BROWSER_VERSION="${PROJECT_VERSION}"
+    # A process the tests can start on any platform. /bin/sh was the obvious
+    # choice and is not available on Windows; cmake built these tests, so it is
+    # certainly present.
+    RRM_CMAKE_COMMAND="${CMAKE_COMMAND}"
   )
 
   target_link_libraries(${NAME} PRIVATE
