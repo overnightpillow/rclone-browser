@@ -43,6 +43,22 @@ private:
   bool mFirstTime = true;
   int mJobCount = 0;
 
+  // Created on the first update check and shared by both of them.
+  QNetworkAccessManager *mNetwork = nullptr;
+
+  // Asks GitHub for a repository's newest release, at most once a day, and
+  // calls onRelease with the tag when there is one. Asynchronous: the reply
+  // arrives on the event loop rather than being waited for.
+  //
+  // The date under dateKey is written only after a successful response, so an
+  // offline launch retries next time instead of counting as the day's check.
+  void checkLatestRelease(const QString &enabledKey, const QString &dateKey,
+                          const QUrl &url,
+                          std::function<void(const QString &)> onRelease);
+
+  // Both checks: rclone's own releases, and this application's.
+  void checkForUpdates(const QString &rcloneVersion);
+
   bool canClose();
   void closeEvent(QCloseEvent *ev) override;
   bool getConfigPassword(QProcess *p);
