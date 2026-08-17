@@ -1,12 +1,18 @@
 # Change Log
 
-## [2.0.0] - 2026-08-16
+## [2.0.0] - 2026-08-17
 
 First release of this fork. Upstream's last release was 1.8.0 in February 2020;
 2.0.0 marks the Qt6 port and the restic support, not a rename — the application
 is still Rclone Browser and still stores its settings under the same name, so
 existing preferences and saved tasks carry over untouched.
 
+-   NEW: downloads. A `.dmg` for macOS (Apple silicon), an `.AppImage` for
+    Linux (x86_64, glibc 2.39 or newer), and an installer plus a portable
+    `.zip` for Windows (x64), built on a tag and published with `SHA256SUMS`.
+    Upstream's release scripts targeted Qt5, Visual Studio 2019 and CentOS 7
+    and none of them ran any more. Intel Macs are not built: Homebrew's Qt is
+    single-architecture, so build from source there.
 -   NEW: read-only restic snapshot browsing. Browse snapshots, their file
     trees, and restore to a local folder. Repositories can be reached through
     an rclone remote already configured here (`rclone:remote:path`), so a
@@ -22,14 +28,67 @@ existing preferences and saved tasks carry over untouched.
 -   NEW: `-Werror` is opt-in via `-DRRM_WERROR=ON` rather than pinned on, so a
     newer compiler cannot make the project unbuildable again.
 -   NEW: Gitea Actions CI replacing the dead Travis and AppVeyor configs.
+-   CHANGED: cancelling a job asks rclone to stop rather than killing it, so it
+    can close connections and clean up partial files, and the window no longer
+    freezes while it does. The row reads "Cancelling" and closes when the
+    process has actually exited.
+-   CHANGED: dropping several files onto a remote at once opens one transfer
+    dialog and runs a transfer per item. Only single-file drops were accepted
+    before; a multiple selection did nothing at all.
+-   CHANGED: Google Drive's "shared with me" is a property of the tab it is
+    ticked in. It was a global setting every tab wrote to, so turning it on in
+    one Drive tab silently changed what the others listed.
+-   CHANGED: update checks run in the background instead of blocking startup on
+    two network round trips, record the day's check only after a response that
+    parses — an offline launch used to count as the check for the next 24
+    hours — and the application's own check looks at this fork's releases
+    rather than upstream's, which have not moved since 2020.
+-   CHANGED: saved tasks are written atomically. A crash or a full disk part
+    way through a save used to lose every task; a file that cannot be read is
+    now kept as `tasks.bin.corrupt` with a warning instead of being discarded
+    in silence.
+-   CHANGED: remote paths are held as paths rather than as `QDir`, which turns
+    an empty path into `"."` — the root of a remote — so listings ran against
+    `remote:.` and every path below it read `./name`.
 -   CHANGED: directory listings use a single `rclone lsjson` call instead of
     `rclone lsd` plus `rclone lsl --max-depth 1` parsed with regular
     expressions. Half the process spawns per expanded folder, and no more
     text-scraping.
 -   CHANGED: modification times display in local time rather than whatever zone
     rclone printed.
+-   FIXED: the transfer details panel had been blank since rclone 1.56 changed
+    its stats format four years ago: Size, Total size, Bandwidth and ETA stayed
+    empty for every transfer. Three smaller breaks in the same output are fixed
+    with it — the error count was dropped whenever rclone appended
+    "(retrying may help)", a file's progress bar did not appear until rclone
+    had a transfer rate to report, and the Checks line stopped parsing when
+    ", Listed N" was added in 1.60.
+-   FIXED: Move moved a folder's *contents* into the destination and left the
+    folder behind, empty. It moves the folder.
+-   FIXED: the section headings in the remotes list were unreadable in dark
+    mode: present, taking up space, and near-black on near-black.
 -   FIXED: a failed directory listing was indistinguishable from an empty
     directory; failures now show an error row with rclone's message.
+-   FIXED: the job log was emptied wholesale every 10,000 lines, and the stream
+    and mount logs grew without limit.
+-   FIXED: the Jobs tab's "copy command" button produced a command that could
+    not be pasted into a shell if any path contained a space.
+-   FIXED: a blank line in the exclude box, or a trailing newline, passed
+    `--exclude ""` to rclone.
+-   FIXED: the single-instance lock used one fixed name in the temporary
+    directory, so on Linux the second person logged into a machine was told the
+    application was already running.
+-   FIXED: unmounting froze the window until it completed or timed out, and a
+    stream that ended on its own could crash the application on close.
+-   FIXED: `rclone config` on Linux knew three terminals and passed `-e`, which
+    gnome-terminal removed in 3.38, so the button did nothing on a current GNOME
+    desktop.
+-   FIXED: Windows would not compile at all. Three errors, each invisible to
+    every other platform: a call left on the old `std::string` signature of the
+    version comparison, `Qt::AA_DisableWindowContextHelpButton` (removed in Qt
+    6), and `windows.h`'s `min`/`max` macros eating `std::max`. CI now builds
+    and tests Windows on every push, so this cannot hide again. It has been
+    compiled and tested there, but nobody has yet launched it.
 -   FIXED: on Linux, settings were written to `/rclone-browser/rclone-browser.ini`
     at the filesystem root whenever `$XDG_CONFIG_HOME` was unset, which is the
     normal case. Now falls back to `~/.config` per the XDG spec.

@@ -48,7 +48,7 @@
   <url type="bugtracker">https://gitea.ironlake.net/kevin/rclone-browser/issues</url>
   <url type="help">https://gitea.ironlake.net/kevin/rclone-browser</url>
   <releases>
-    <release version="2.0.0" date="2026-08-16" />
+    <release version="2.0.0" date="2026-08-17" />
     <release version="1.8.0" date="2020-02-17" />
   </releases>
   <developer_name>Kevin Versteeg, continuing work by kapitainsky, Martins Mozeiko, Dariusz Bogdanski and contributors</developer_name>
