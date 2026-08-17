@@ -101,6 +101,16 @@ if (($Runtime | Where-Object { -not (Test-Path (Join-Path $Stage $_)) }) -and
     }
 }
 
+# windeployqt also drops the redistributable *installer* in beside the DLLs,
+# which is 25MB of nothing useful: the DLLs next to the executable are what
+# make it run, and a vc_redist.exe in the folder mostly invites someone to run
+# it. It doubled the size of the download.
+Get-ChildItem -Path $Stage -Filter 'vc_redist*.exe' -ErrorAction SilentlyContinue |
+    ForEach-Object {
+        Write-Host "==> Dropping $($_.Name), $([math]::Round($_.Length / 1MB)) MB"
+        Remove-Item $_.FullName -Force
+    }
+
 Write-Host '==> Verifying the staged application'
 foreach ($dll in @('Qt6Core.dll', 'Qt6Gui.dll', 'Qt6Widgets.dll', 'Qt6Network.dll')) {
     if (-not (Test-Path (Join-Path $Stage $dll))) {
@@ -121,6 +131,15 @@ if ($MissingRuntime) {
            ". It would not start on a machine without the Visual C++ " +
            "Redistributable installed.")
 }
+
+# Reported as a workflow notice, which is readable without a GitHub login --
+# the logs are not. It is the only way to see what actually got staged from a
+# machine that cannot run any of this.
+$Staged = (Get-ChildItem -Path $Stage -File | Measure-Object).Count
+$StagedMB = [math]::Round((Get-ChildItem -Path $Stage -Recurse -File |
+    Measure-Object -Property Length -Sum).Sum / 1MB)
+Write-Host ("::notice::staged $Staged files, $StagedMB MB, runtime: " +
+            ($Runtime -join ', '))
 
 Write-Host '==> Zipping'
 $Zip = Join-Path $Release "$StageName.zip"
