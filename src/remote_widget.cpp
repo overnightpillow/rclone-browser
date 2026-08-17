@@ -170,8 +170,12 @@ QString root = isLocal ? "/" : QString();
 
 #if defined(Q_OS_WIN32)
           // check if required version
-          unsigned int result =
-              compareVersion(rcloneVersion.toStdString(), "1.50");
+          //
+          // Not .toStdString(): compareVersion took std::string upstream and
+          // takes QString since the Qt6 port, and this call is inside the one
+          // block no other platform compiles, so it went on passing the wrong
+          // type until a Windows compiler finally saw it.
+          unsigned int result = compareVersion(rcloneVersion, "1.50");
           if (result == 2) {
             ui.mount->setDisabled(true);
           } else {

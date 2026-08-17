@@ -24,6 +24,10 @@ if [ ! -x "$MACDEPLOYQT" ]; then
 fi
 
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")-$(git -C "$ROOT" rev-parse --short HEAD)"
+# Homebrew's Qt is built for the machine it is installed on, so the bundle is
+# single-architecture and the file has to say which: an arm64 build will not
+# run on an Intel Mac at all, and Rosetta only translates the other direction.
+ARCH="$(uname -m)"
 APP="$BUILD/build/$APP_NAME.app"
 
 echo "==> Building $APP_NAME $VERSION"
@@ -136,11 +140,11 @@ cp -R "$APP" "$RELEASE/"
 if [ "${1:-}" = "--zip" ]; then
   echo "==> Zipping"
   # ditto preserves the signature and resource forks; plain zip does not.
-  ( cd "$RELEASE" && ditto -c -k --keepParent "$APP_NAME.app" "$APP_NAME-$VERSION-macos.zip" )
+  ( cd "$RELEASE" && ditto -c -k --keepParent "$APP_NAME.app" "$APP_NAME-$VERSION-macos-$ARCH.zip" )
 fi
 
 if [ "${1:-}" = "--dmg" ]; then
-  DMG="$RELEASE/$APP_NAME-$VERSION-macos.dmg"
+  DMG="$RELEASE/$APP_NAME-$VERSION-macos-$ARCH.dmg"
   echo "==> Building $(basename "$DMG")"
 
   # A disk image is what a Mac user expects to download: it mounts to a window

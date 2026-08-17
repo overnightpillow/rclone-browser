@@ -24,7 +24,17 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-latest
+    # Homebrew's Qt is built for the machine it is installed on, so each runner
+    # produces a single-architecture bundle. An arm64 build will not run on an
+    # Intel Mac at all -- Rosetta only translates the other way -- so both are
+    # built, and the file names say which is which.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest   # Apple silicon
+          - runner: macos-13       # Intel
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,7 +48,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos
+          name: macos-${{ matrix.runner }}
           path: release/*.dmg
           retention-days: 14
 
@@ -130,7 +140,8 @@ jobs:
 
           | Platform | File | Notes |
           |---|---|---|
-          | macOS (Apple silicon and Intel) | `*-macos.dmg` | Open it and drag the application to Applications |
+          | macOS, Apple silicon | `*-macos-arm64.dmg` | Open it and drag the application to Applications |
+          | macOS, Intel | `*-macos-x86_64.dmg` | Open it and drag the application to Applications |
           | Linux (x86_64) | `*-linux-x86_64.AppImage` | `chmod +x` it and run it; needs glibc 2.39 or newer |
           | Windows (x64) | `*-windows-x64-setup.exe` | Or take the `.zip` for a portable copy |
 

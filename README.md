@@ -24,7 +24,8 @@ Builds for each release are on the
 
 | Platform | File | Install |
 |---|---|---|
-| macOS 12+, Apple silicon or Intel | `rclone-browser-<version>-macos.dmg` | Open it, drag the app to Applications |
+| macOS 12+, Apple silicon | `rclone-browser-<version>-macos-arm64.dmg` | Open it, drag the app to Applications |
+| macOS 12+, Intel | `rclone-browser-<version>-macos-x86_64.dmg` | Open it, drag the app to Applications |
 | Linux x86_64 | `rclone-browser-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it |
 | Windows 10/11 x64 | `rclone-browser-<version>-windows-x64-setup.exe` | Run the installer, or take the `.zip` for a portable copy |
 

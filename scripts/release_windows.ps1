@@ -43,8 +43,18 @@ Write-Host "==> Building $AppName $Version for $Arch"
 if (Test-Path $Build) { Remove-Item -Recurse -Force $Build }
 cmake -S $Root -B $Build -DCMAKE_BUILD_TYPE=Release
 if ($LASTEXITCODE -ne 0) { throw 'configure failed' }
-cmake --build $Build --config Release
-if ($LASTEXITCODE -ne 0) { throw 'build failed' }
+
+# The build output is echoed back as workflow annotations on failure, which
+# can be read without signing in to GitHub -- the logs cannot. There is no
+# Windows machine behind this script, so that is the only view of what broke.
+$BuildLog = Join-Path $Build 'build.log'
+cmake --build $Build --config Release 2>&1 | Tee-Object -FilePath $BuildLog
+if ($LASTEXITCODE -ne 0) {
+    Select-String -Path $BuildLog -Pattern 'error [A-Z]+[0-9]+' |
+        Select-Object -First 15 |
+        ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
+    throw 'build failed'
+}
 
 # Single-config generators put it in build/, multi-config in build/Release.
 $Exe = Get-ChildItem -Path $Build -Recurse -Filter "$AppName.exe" |

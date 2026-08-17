@@ -2,6 +2,12 @@ name: build
 
 # Mirror of .gitea/workflows/build.yml — the repository is pushed to both
 # Gitea and GitHub, so keep the two in step when either changes.
+#
+# The windows job is the exception, and only lives here: Gitea's runners are
+# Linux containers. It exists because the Windows-only code compiles nowhere
+# else, and a call there passed the wrong type to compareVersion from the Qt6
+# port until the first release build finally put it in front of a Windows
+# compiler. Once per release is too late to find that.
 
 on:
   push:
@@ -55,6 +61,43 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          arch: win64_msvc2022_64
+          cache: true
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        # No -Werror here yet: MSVC's warnings are a different set from GCC's
+        # and clang's, and nobody has read through them once. Compiling at all
+        # is the bar this job is setting.
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: pwsh
+        # Compiler errors are echoed back as workflow annotations, which are
+        # readable without signing in -- unlike the logs. Debugging a platform
+        # you cannot reproduce is hard enough without that.
+        run: |
+          cmake --build build 2>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            Select-String -Path build.log -Pattern 'error [A-Z]+[0-9]+' |
+              Select-Object -First 15 |
+              ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
+            exit 1
+          }
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
