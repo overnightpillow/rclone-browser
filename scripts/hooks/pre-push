@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+#
+# Checks that what is about to be pushed builds on Linux before it becomes
+# public. Gitea is private but mirrors to GitHub within seconds, so a push is
+# effectively a publish.
+#
+# Enable with:  git config core.hooksPath scripts/hooks
+# Bypass with:  git push --no-verify      (or SKIP_LINUX_PREFLIGHT=1 git push)
+
+set -euo pipefail
+
+if [ "${SKIP_LINUX_PREFLIGHT:-0}" = "1" ]; then
+  echo "pre-push: skipped (SKIP_LINUX_PREFLIGHT=1)"
+  exit 0
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+ZERO="0000000000000000000000000000000000000000"
+
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  # A deletion has nothing to build.
+  [ "$local_sha" = "$ZERO" ] && continue
+
+  # Check the tip only. Intermediate commits are not what lands on the mirror
+  # as the visible state, and building each would make pushing unusable.
+  exec "$ROOT/scripts/preflight_linux.sh" "$local_sha" </dev/null
+done
+
+exit 0

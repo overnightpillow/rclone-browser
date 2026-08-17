@@ -46,6 +46,22 @@ Build with `-DRRM_WERROR=ON` before opening a pull request — CI does, and it i
 the setting that keeps the build from rotting the way upstream's did. Tests are
 headless (`QT_QPA_PLATFORM=offscreen`), so they need no display.
 
+If you develop on macOS, check the Linux build before you push:
+
+```bash
+scripts/preflight_linux.sh
+```
+
+It builds the committed tree in an Ubuntu 24.04 container with the same
+compiler, Qt version and flags CI uses. Homebrew's Qt is far newer than
+Ubuntu's, and clang diagnoses less than GCC — both differences have broken CI
+here in ways nothing on a Mac could reveal. Roughly 15 seconds once its image
+is built. Wire it in permanently with:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
 ## Scope
 
 - **restic support is read-only.** Browsing snapshots and restoring from them
