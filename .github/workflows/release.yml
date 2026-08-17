@@ -24,17 +24,15 @@ permissions:
 
 jobs:
   macos:
-    # Homebrew's Qt is built for the machine it is installed on, so each runner
-    # produces a single-architecture bundle. An arm64 build will not run on an
-    # Intel Mac at all -- Rosetta only translates the other way -- so both are
-    # built, and the file names say which is which.
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-latest   # Apple silicon
-          - runner: macos-13       # Intel
-    runs-on: ${{ matrix.runner }}
+    # Apple silicon only. Homebrew's Qt is built for the machine it is installed
+    # on, so a runner produces a single-architecture bundle and the file name
+    # says which -- an arm64 build will not run on an Intel Mac at all, since
+    # Rosetta only translates the other way.
+    #
+    # An Intel job on macos-13 was tried and dropped: those runners are scarce
+    # enough that the whole release waited on one, for an architecture Apple
+    # stopped shipping in 2020. Intel users build from source.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +46,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.runner }}
+          name: macos
           path: release/*.dmg
           retention-days: 14
 
@@ -141,7 +139,6 @@ jobs:
           | Platform | File | Notes |
           |---|---|---|
           | macOS, Apple silicon | `*-macos-arm64.dmg` | Open it and drag the application to Applications |
-          | macOS, Intel | `*-macos-x86_64.dmg` | Open it and drag the application to Applications |
           | Linux (x86_64) | `*-linux-x86_64.AppImage` | `chmod +x` it and run it; needs glibc 2.39 or newer |
           | Windows (x64) | `*-windows-x64-setup.exe` | Or take the `.zip` for a portable copy |
 
@@ -160,6 +157,11 @@ jobs:
 
           The installer is unsigned, so SmartScreen warns about it. **More info**
           then **Run anyway**, or use the portable zip.
+
+          ### Intel Macs
+
+          Not built -- build from source, which the README covers. Apple silicon
+          is what ships here.
 
           ### rclone
 

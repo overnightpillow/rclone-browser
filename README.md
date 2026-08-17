@@ -25,7 +25,6 @@ Builds for each release are on the
 | Platform | File | Install |
 |---|---|---|
 | macOS 12+, Apple silicon | `rclone-browser-<version>-macos-arm64.dmg` | Open it, drag the app to Applications |
-| macOS 12+, Intel | `rclone-browser-<version>-macos-x86_64.dmg` | Open it, drag the app to Applications |
 | Linux x86_64 | `rclone-browser-<version>-linux-x86_64.AppImage` | `chmod +x` it and run it |
 | Windows 10/11 x64 | `rclone-browser-<version>-windows-x64-setup.exe` | Run the installer, or take the `.zip` for a portable copy |
 
@@ -38,6 +37,11 @@ sha256sum -c SHA256SUMS --ignore-missing    # shasum -a 256 -c on macOS
 **rclone is not bundled.** Install it from
 [rclone.org/downloads](https://rclone.org/downloads/) — the application looks
 for it on your `PATH` and asks in Preferences if it cannot find it.
+
+**Intel Macs are not built.** Homebrew's Qt is single-architecture, so the disk
+image above is arm64 and will not run under Rosetta, which only translates the
+other direction. Building from source on an Intel Mac works — see
+[Building](#building).
 
 ### macOS: "cannot be opened because the developer cannot be verified"
 
