@@ -1,5 +1,8 @@
 .DS_Store
-build*
+# Anchored: unanchored "build*" matched any file named build.* at any depth,
+# including .github/workflows/build.yml, which silently kept CI out of the
+# repository.
+/build*
 *.user*
 scripts/*.zip
 scripts/*.png

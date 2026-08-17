@@ -1,5 +1,7 @@
 # rclone-browser 2.0
 
+[![build](https://github.com/overnightpillow/rclone-browser/actions/workflows/build.yml/badge.svg)](https://github.com/overnightpillow/rclone-browser/actions/workflows/build.yml)
+
 A Qt6 desktop front-end for [rclone](https://rclone.org/), with read-only
 browsing of [restic](https://restic.net/) repositories.
 
@@ -220,8 +222,8 @@ remotes, in light and dark mode.
 
 **Windows and Linux are unbuilt.** The Qt6 replacement for the Windows-only
 icon path (`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) has
-never been through a Windows compiler. CI covers Linux when a runner is
-available.
+never been through a Windows compiler. CI builds and tests Linux and macOS on
+every push; there is no Windows runner yet.
 
 ### Planned
 

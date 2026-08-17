@@ -1,0 +1,60 @@
+name: build
+
+# Mirror of .gitea/workflows/build.yml — the repository is pushed to both
+# Gitea and GitHub, so keep the two in step when either changes.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6 and build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build \
+            qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev
+
+      - name: Configure
+        # -Werror is opt-in so a new compiler cannot break the default build;
+        # CI is exactly where it should be switched on.
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRRM_WERROR=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        # The widget tests drive real Qt widgets but need no display: each test
+        # target sets QT_QPA_PLATFORM=offscreen itself.
+        run: ctest --test-dir build --output-on-failure
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6
+        run: brew install qt cmake ninja
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DRRM_WERROR=ON
+          -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
