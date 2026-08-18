@@ -28,10 +28,21 @@ $Build = Join-Path $Root 'build-release'
 $Release = Join-Path $Root 'release'
 $AppName = 'rclone-browser'
 
+# A tagged build names itself after the tag; anything else carries the commit,
+# which is what tells two development builds apart. Naming a *release* build
+# after the commit is what let the 2.0.0 release end up offering three Windows
+# zips: rebuilding the tag produced differently-named files, so uploading them
+# added a set beside the old one instead of replacing it -- and one of the old
+# ones did not run.
 $Version = (Get-Content (Join-Path $Root 'VERSION') -Raw).Trim()
 try {
-    $Commit = (git -C $Root rev-parse --short HEAD).Trim()
-    if ($Commit) { $Version = "$Version-$Commit" }
+    $Tag = (git -C $Root describe --exact-match --tags HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $Tag) {
+        $Version = $Tag.Trim() -replace '^v', ''
+    } else {
+        $Commit = (git -C $Root rev-parse --short HEAD).Trim()
+        if ($Commit) { $Version = "$Version-$Commit" }
+    }
 } catch {
     # A source archive with no git metadata is still buildable.
 }

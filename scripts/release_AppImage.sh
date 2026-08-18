@@ -32,8 +32,16 @@ TOOLS="${LINUXDEPLOY_CACHE:-$BUILD/tools}"
 ARCH="$(uname -m)"
 APP_NAME="rclone-browser"
 
+# A tagged build names itself after the tag; anything else carries the commit,
+# which is what tells two development builds apart. Naming a *release* build
+# after the commit is what let the 2.0.0 release end up offering three Windows
+# zips: rebuilding the tag produced differently-named files, so uploading them
+# added a set beside the old one instead of replacing it -- and one of the old
+# ones did not run.
 VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
-if git -C "$ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
+if TAG="$(git -C "$ROOT" describe --exact-match --tags HEAD 2>/dev/null)"; then
+  VERSION="${TAG#v}"
+elif git -C "$ROOT" rev-parse --short HEAD >/dev/null 2>&1; then
   VERSION="$VERSION-$(git -C "$ROOT" rev-parse --short HEAD)"
 fi
 

@@ -23,7 +23,18 @@ if [ ! -x "$MACDEPLOYQT" ]; then
   exit 1
 fi
 
-VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")-$(git -C "$ROOT" rev-parse --short HEAD)"
+# A tagged build names itself after the tag; anything else carries the commit,
+# which is what tells two development builds apart. Naming a *release* build
+# after the commit is what let the 2.0.0 release end up offering three Windows
+# zips: rebuilding the tag produced differently-named files, so uploading them
+# added a set beside the old one instead of replacing it -- and one of the old
+# ones did not run.
+VERSION="$(tr -d '[:space:]' < "$ROOT/VERSION")"
+if TAG="$(git -C "$ROOT" describe --exact-match --tags HEAD 2>/dev/null)"; then
+  VERSION="${TAG#v}"
+else
+  VERSION="$VERSION-$(git -C "$ROOT" rev-parse --short HEAD)"
+fi
 # Homebrew's Qt is built for the machine it is installed on, so the bundle is
 # single-architecture and the file has to say which: an arm64 build will not
 # run on an Intel Mac at all, and Rosetta only translates the other direction.
