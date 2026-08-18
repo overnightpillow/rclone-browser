@@ -72,8 +72,8 @@ The installer is unsigned — a code-signing certificate is a yearly cost —
 so SmartScreen warns about it. **More info**, then **Run anyway**. The portable
 zip avoids the installer entirely.
 
-Windows builds are produced by CI but, unlike macOS and Linux, **nobody has
-run one yet**. See [Status](#status).
+The portable zip has been run on Windows 11 and starts. The installer has not
+been tried by anyone yet — see [Status](#status).
 
 ## What this fork changes
 
@@ -297,11 +297,16 @@ remotes, in light and dark mode.
 — in CI on every push, alongside macOS. The application has not been driven as
 a GUI there, so treat the interface as unproven even though the code is not.
 
-**Windows is built but unproven.** The release workflow compiles it and
-produces an installer, so the Qt6 replacement for the Windows-only icon path
-(`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) does at least
-go through a Windows compiler now. Nobody has launched the result. If you try
-it, an issue saying so either way is genuinely useful.
+**Windows starts.** CI compiles and tests it on every push, and the 2.0.0
+portable zip has been launched on Windows 11 — which is the first time any
+build of this fork has run there, and it took four compile errors and two
+packaging bugs to get to. The Qt6 replacement for the Windows-only icon path
+(`QImage::fromHICON`, replacing the removed `QtWin::fromHICON`) is therefore
+compiled and loaded, though not deliberately exercised.
+
+Beyond "it starts", Windows is unexercised: nobody has run a transfer, a mount
+or a restic browse there, and the installer has not been tried at all. Reports
+either way are useful.
 
 Qt 6.4 is the floor, set by Ubuntu 24.04 LTS and enforced in `find_package`.
 
