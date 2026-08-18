@@ -170,4 +170,17 @@ jobs:
           NOTES
           )"
           fi
+          # Clear what is already attached before uploading. --clobber only
+          # replaces assets of the same name, so when a rebuild produced
+          # differently-named files it added a set beside the old one: the
+          # 2.0.0 release ended up with twelve files, three per platform, and
+          # the oldest Windows zip was one that would not start. Names are
+          # stable per tag now, but a release should hold what this run built
+          # and nothing else.
+          for ASSET in $(gh release view "$TAG" --json assets \
+                           --jq '.assets[].name' 2>/dev/null); do
+            echo "removing stale asset $ASSET"
+            gh release delete-asset "$TAG" "$ASSET" --yes
+          done
+
           gh release upload "$TAG" release/* --clobber
