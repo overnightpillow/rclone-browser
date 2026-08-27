@@ -114,7 +114,10 @@ jobs:
           ctest --test-dir build --output-on-failure 2>&1 |
             Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) {
-            $log = (Get-Content test.log -Tail 200) -join "`n"
+            # The per-test result files carry what stdout did not.
+            $results = Get-ChildItem -Path build -Recurse -Filter '*-results.txt' |
+              ForEach-Object { "--- $($_.Name) ---"; Get-Content $_.FullName }
+            $log = ((Get-Content test.log -Tail 100) + $results) -join "`n"
             $log = $log -replace '%','%25' -replace "`r",'' -replace "`n",'%0A'
             Write-Host "::error::$log"
             exit 1

@@ -53,7 +53,11 @@ function(rrm_add_test NAME)
     target_link_libraries(${NAME} PRIVATE ${COCOA_LIB} ${UTTYPE_LIB})
   endif()
 
-  add_test(NAME ${NAME} COMMAND ${NAME})
+  # Two loggers: the usual one on stdout, and a file. Whatever swallows the
+  # Windows runner's stdout -- a failing test_widgets came back with an empty
+  # captured output -- the file is written straight by the test process and
+  # survives it.
+  add_test(NAME ${NAME} COMMAND ${NAME} -o ${NAME}-results.txt,txt -o -,txt)
 
   # No display in CI, and none wanted locally either: widget tests must not
   # steal focus or open windows while they run.
