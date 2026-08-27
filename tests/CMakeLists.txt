@@ -24,6 +24,12 @@ endforeach()
 function(rrm_add_test NAME)
   qt_add_executable(${NAME} ${NAME}.cpp ${TEST_SOURCES} ${TEST_UI})
 
+  # qt_add_executable builds a GUI-subsystem binary on Windows, which has no
+  # stdout when it is not launched from a console -- so every line QTest
+  # printed was discarded and a failing test reported nothing at all. Tests are
+  # console programs.
+  set_property(TARGET ${NAME} PROPERTY WIN32_EXECUTABLE FALSE)
+
   target_include_directories(${NAME} PRIVATE
     ${RRM_SRC_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}
