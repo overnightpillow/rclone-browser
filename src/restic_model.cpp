@@ -315,7 +315,21 @@ void ResticModel::runRestic(const QStringList &args,
                      report(false, error, QByteArray());
                    });
 
-  process->start(program, ResticBaseArgs(mRepo) + args, QIODevice::ReadOnly);
+  // Started from the event loop, not from here. On Windows a program that
+  // cannot be found fails inside start() itself, so errorOccurred() -- and the
+  // failed() signal raised from it -- fires before start() returns; the first
+  // listing is kicked off by the constructor, so that signal reached nobody at
+  // all, and no caller could have connected in time. Elsewhere the failure
+  // arrives from the event loop anyway, which is what made this Windows-only.
+  //
+  // The process is the context object, so if the model is destroyed first the
+  // queued call is simply dropped along with it.
+  const QStringList full = ResticBaseArgs(mRepo) + args;
+  QMetaObject::invokeMethod(
+      process, [process, program, full]() {
+        process->start(program, full, QIODevice::ReadOnly);
+      },
+      Qt::QueuedConnection);
 }
 
 void ResticModel::refresh() {
