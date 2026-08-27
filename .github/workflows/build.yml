@@ -114,9 +114,16 @@ jobs:
           ctest --test-dir build --output-on-failure 2>&1 |
             Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) {
-            # The per-test result files carry what stdout did not.
+            # The per-test result files carry what stdout did not. Only the
+            # failing ones: all four together overflow an annotation, and the
+            # passing runs push the interesting file out of it.
             $results = Get-ChildItem -Path build -Recurse -Filter '*-results.txt' |
+              Where-Object { Select-String -Path $_.FullName -Pattern '^(FAIL|XPASS|QFATAL)' -Quiet } |
               ForEach-Object { "--- $($_.Name) ---"; Get-Content $_.FullName }
+            if (-not $results) {
+              $results = Get-ChildItem -Path build -Recurse -Filter 'test_widgets-results.txt' |
+                ForEach-Object { "--- $($_.Name) (no FAIL line) ---"; Get-Content $_.FullName }
+            }
             $log = ((Get-Content test.log -Tail 100) + $results) -join "`n"
             $log = $log -replace '%','%25' -replace "`r",'' -replace "`n",'%0A'
             Write-Host "::error::$log"
