@@ -105,12 +105,17 @@ jobs:
         shell: pwsh
         # Failures come back as annotations for the same reason the build step
         # does it: the logs need a GitHub login, annotations do not.
+        #
+        # The whole log goes into one annotation rather than a grep for
+        # 'FAIL!': a test that exits non-zero without printing a QTest failure
+        # -- a crash, an abort, a qFatal -- left nothing to grep for, and the
+        # annotation said only that something had failed.
         run: |
           ctest --test-dir build --output-on-failure 2>&1 |
             Tee-Object -FilePath test.log
           if ($LASTEXITCODE -ne 0) {
-            Select-String -Path test.log -Pattern 'FAIL!|Assertion|\(Failed\)' |
-              Select-Object -First 15 |
-              ForEach-Object { Write-Host "::error::$($_.Line.Trim())" }
+            $log = (Get-Content test.log -Tail 200) -join "`n"
+            $log = $log -replace '%','%25' -replace "`r",'' -replace "`n",'%0A'
+            Write-Host "::error::$log"
             exit 1
           }
